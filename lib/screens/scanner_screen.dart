@@ -55,12 +55,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
           MobileScanner(
             controller: _controller,
             onDetect: _onDetect,
-            errorBuilder: (context, error) {
+            errorBuilder: (context, error, child) {
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text(
-                    'Camera niet beschikbaar:\n${error.errorCode}',
+                    'Camera niet beschikbaar:\n${error.errorCode.name}',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white),
                   ),
