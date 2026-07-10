@@ -14,7 +14,8 @@ class RegistrationScreen extends StatefulWidget {
 
 class _RegistrationScreenState extends State<RegistrationScreen> {
   final _auth = AuthService();
-  final _controller = TextEditingController();
+  // Prefilled with the allowed demo number.
+  final _controller = TextEditingController(text: '0610000000');
   final _formKey = GlobalKey<FormState>();
   bool _sending = false;
 
@@ -27,7 +28,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _sending = true);
-    final phone = '+31 ${_controller.text.trim()}';
+    final phone = _controller.text.trim();
     await _auth.sendCode(phone);
     if (!mounted) return;
     setState(() => _sending = false);
@@ -75,19 +76,21 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                   controller: _controller,
                   keyboardType: TextInputType.phone,
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9 ]')),
-                    LengthLimitingTextInputFormatter(12),
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9 +\-]')),
+                    LengthLimitingTextInputFormatter(16),
                   ],
                   decoration: const InputDecoration(
                     labelText: 'Telefoonnummer',
-                    prefixText: '+31  ',
-                    hintText: '6 12 34 56 78',
+                    prefixIcon: Icon(Icons.phone_outlined),
+                    hintText: '0612345678',
                   ),
                   validator: (value) {
-                    final digits =
-                        (value ?? '').replaceAll(RegExp(r'\s'), '');
-                    if (digits.length < 9) {
+                    final v = (value ?? '').trim();
+                    if (AuthService.normalize(v).length < 9) {
                       return 'Voer een geldig telefoonnummer in';
+                    }
+                    if (!_auth.isAllowed(v)) {
+                      return 'Dit nummer heeft geen toegang tot de app';
                     }
                     return null;
                   },
@@ -108,7 +111,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Demo: je ontvangt geen echte SMS. Gebruik code 1234.',
+                  'Demo: alleen 0610000000 heeft toegang. Code 1234.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.black38, fontSize: 12),
                 ),
