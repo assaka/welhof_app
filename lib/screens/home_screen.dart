@@ -17,7 +17,9 @@ class HomeScreen extends StatelessWidget {
       // A `drawer` makes the AppBar show the hamburger icon automatically;
       // it slides in from the left.
       drawer: WelhofDrawer(phoneNumber: phoneNumber),
-      appBar: AppBar(title: const Text('Welhof')),
+      appBar: AppBar(
+        title: Image.asset('assets/images/welhof_logo.png', height: 30),
+      ),
       body: SafeArea(
         child: Center(
           child: Padding(
@@ -103,6 +105,19 @@ class WelhofDrawer extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Image.asset(
+                    'assets/images/welhof_logo.png',
+                    height: 34,
+                  ),
+                ),
+                const SizedBox(height: 18),
                 const CircleAvatar(
                   radius: 26,
                   backgroundColor: WelhofColors.accent,

@@ -47,15 +47,12 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Container(
-                  height: 72,
-                  width: 72,
-                  decoration: BoxDecoration(
-                    color: WelhofColors.brand,
-                    borderRadius: BorderRadius.circular(20),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Image.asset(
+                    'assets/images/welhof_logo.png',
+                    height: 60,
                   ),
-                  child: const Icon(Icons.chair_alt_rounded,
-                      color: Colors.white, size: 40),
                 ),
                 const SizedBox(height: 28),
                 Text(

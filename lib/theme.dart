@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 /// Welhof brand palette + shared theme.
+/// Colors taken from the Welhof Hyva theme: primary blue #0057bf,
+/// accent red #e40033 (the logo's ellipse).
 class WelhofColors {
-  static const Color brand = Color(0xFF1F3A5F); // deep navy
-  static const Color accent = Color(0xFFE8A13A); // warm amber
-  static const Color surface = Color(0xFFF6F7F9);
-  static const Color ink = Color(0xFF12202E);
+  static const Color brand = Color(0xFF0057BF); // Welhof blue
+  static const Color brandDark = Color(0xFF004A9F); // darker blue
+  static const Color accent = Color(0xFFE40033); // Welhof red
+  static const Color surface = Color(0xFFF4F6F9);
+  static const Color ink = Color(0xFF13233A);
 }
 
 ThemeData buildWelhofTheme() {

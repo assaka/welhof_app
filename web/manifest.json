@@ -1,11 +1,11 @@
 {
-    "name": "welhof_app",
-    "short_name": "welhof_app",
+    "name": "Welhof",
+    "short_name": "Welhof",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0057BF",
+    "theme_color": "#0057BF",
+    "description": "Welhof warehouse demo app",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
