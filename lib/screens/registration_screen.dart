@@ -14,8 +14,7 @@ class RegistrationScreen extends StatefulWidget {
 
 class _RegistrationScreenState extends State<RegistrationScreen> {
   final _auth = AuthService();
-  // Prefilled with the allowed demo number.
-  final _controller = TextEditingController(text: '0610000000');
+  final _controller = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _sending = false;
 
