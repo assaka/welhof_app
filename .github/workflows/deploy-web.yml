@@ -31,8 +31,10 @@ jobs:
 
       # base-href must match the repo name so assets resolve at
       # https://<user>.github.io/welhof_app/
+      # --pwa-strategy=none disables the service worker so deploys aren't
+      # served stale from an aggressive app cache.
       - name: Build web
-        run: flutter build web --release --base-href /welhof_app/
+        run: flutter build web --release --base-href /welhof_app/ --pwa-strategy=none
 
       - uses: actions/upload-pages-artifact@v3
         with:
