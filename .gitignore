@@ -19,7 +19,7 @@ build/
 /linux/
 /macos/
 /windows/
-/web/
+# NOTE: /web/ is committed so GitHub Pages CI can build the web app.
 
 # Misc
 *.lock
