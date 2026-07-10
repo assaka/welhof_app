@@ -18,7 +18,14 @@ class HomeScreen extends StatelessWidget {
       // it slides in from the left.
       drawer: WelhofDrawer(phoneNumber: phoneNumber),
       appBar: AppBar(
-        title: Image.asset('assets/images/welhof_logo.png', height: 30),
+        title: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Image.asset('assets/images/welhof_logo.png', height: 26),
+        ),
       ),
       body: SafeArea(
         child: Center(
