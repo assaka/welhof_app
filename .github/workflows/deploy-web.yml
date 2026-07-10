@@ -36,6 +36,12 @@ jobs:
       - name: Build web
         run: flutter build web --release --base-href /welhof_app/ --pwa-strategy=none
 
+      # --pwa-strategy=none writes an empty flutter_service_worker.js; replace
+      # it with our self-destroying one so returning visitors' old caching
+      # worker is cleared instead of left inert.
+      - name: Install self-destroying service worker
+        run: cp web/flutter_service_worker.js build/web/flutter_service_worker.js
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
