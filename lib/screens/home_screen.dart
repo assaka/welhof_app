@@ -3,11 +3,75 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../theme.dart';
 import 'registration_screen.dart';
-import 'scanner_screen.dart';
-import 'photo_screen.dart';
+import 'order_picking_screen.dart';
+import 'section_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key, required this.phoneNumber});
+
+  final String phoneNumber;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      // A `drawer` makes the AppBar show the hamburger icon automatically;
+      // it slides in from the left.
+      drawer: WelhofDrawer(phoneNumber: phoneNumber),
+      appBar: AppBar(title: const Text('Welhof')),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 88,
+                  width: 88,
+                  decoration: BoxDecoration(
+                    color: WelhofColors.brand,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: const Icon(Icons.warehouse_rounded,
+                      color: Colors.white, size: 48),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Welkom',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: WelhofColors.ink,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Open het menu linksboven om een module te kiezen.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.black54, height: 1.4),
+                ),
+                const SizedBox(height: 24),
+                Builder(
+                  builder: (context) => FilledButton.icon(
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                    icon: const Icon(Icons.menu),
+                    label: const Text('Menu openen'),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(200, 52),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The left navigation drawer.
+class WelhofDrawer extends StatelessWidget {
+  const WelhofDrawer({super.key, required this.phoneNumber});
 
   final String phoneNumber;
 
@@ -20,154 +84,120 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  void _open(BuildContext context, Widget screen) {
+    Navigator.of(context).pop(); // close the drawer first
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Welhof'),
-        actions: [
-          IconButton(
-            tooltip: 'Uitloggen',
-            onPressed: () => _signOut(context),
-            icon: const Icon(Icons.logout),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: WelhofColors.brand,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 26,
-                    backgroundColor: WelhofColors.accent,
-                    child: Icon(Icons.person, color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Ingelogd als',
-                          style: TextStyle(color: Colors.white70, fontSize: 13),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          phoneNumber,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 28),
-            Text(
-              'Wat wil je doen?',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+    return Drawer(
+      child: Column(
+        children: [
+          // Header with the signed-in user.
+          Container(
+            width: double.infinity,
+            color: WelhofColors.brand,
+            padding: EdgeInsets.fromLTRB(
+                20, MediaQuery.of(context).padding.top + 24, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const CircleAvatar(
+                  radius: 26,
+                  backgroundColor: WelhofColors.accent,
+                  child: Icon(Icons.person, color: Colors.white, size: 28),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Ingelogd als',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  phoneNumber,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
                     fontWeight: FontWeight.bold,
-                    color: WelhofColors.ink,
                   ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            _FeatureCard(
-              icon: Icons.qr_code_scanner_rounded,
-              title: 'Barcode scannen',
-              subtitle: 'Scan een product- of artikelcode.',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ScannerScreen()),
-              ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                _tile(context, Icons.shopping_cart_checkout, 'Order Picking',
+                    () => _open(context, const OrderPickingScreen())),
+                // Incoming products → its single child (Returns) as a
+                // collapsible sub-item.
+                ExpansionTile(
+                  leading: const Icon(Icons.move_to_inbox,
+                      color: WelhofColors.brand),
+                  title: const Text('Incoming products',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  childrenPadding: const EdgeInsets.only(left: 16),
+                  children: [
+                    _tile(context, Icons.assignment_return, 'Returns',
+                        () => _open(
+                            context,
+                            const SectionScreen(
+                              title: 'Returns',
+                              icon: Icons.assignment_return,
+                              breadcrumb: 'Incoming products',
+                            ))),
+                  ],
+                ),
+                _tile(context, Icons.edit_location_alt, 'Change locations',
+                    () => _open(
+                        context,
+                        const SectionScreen(
+                          title: 'Change locations',
+                          icon: Icons.edit_location_alt,
+                        ))),
+                _tile(context, Icons.build, 'Repairs',
+                    () => _open(
+                        context,
+                        const SectionScreen(
+                            title: 'Repairs', icon: Icons.build))),
+                _tile(context, Icons.warehouse, 'Stock',
+                    () => _open(
+                        context,
+                        const SectionScreen(
+                            title: 'Stock', icon: Icons.warehouse))),
+                _tile(context, Icons.help_outline, 'Faq',
+                    () => _open(
+                        context,
+                        const SectionScreen(
+                            title: 'Faq', icon: Icons.help_outline))),
+                _tile(context, Icons.badge, 'HRM',
+                    () => _open(
+                        context,
+                        const SectionScreen(
+                            title: 'HRM', icon: Icons.badge))),
+              ],
             ),
-            const SizedBox(height: 14),
-            _FeatureCard(
-              icon: Icons.photo_camera_rounded,
-              title: 'Foto maken',
-              subtitle: 'Maak of kies een foto.',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const PhotoScreen()),
-              ),
-            ),
-          ],
-        ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.black54),
+            title: const Text('Uitloggen'),
+            onTap: () => _signOut(context),
+          ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
   }
-}
 
-class _FeatureCard extends StatelessWidget {
-  const _FeatureCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Row(
-            children: [
-              Container(
-                height: 54,
-                width: 54,
-                decoration: BoxDecoration(
-                  color: WelhofColors.accent.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(icon, color: WelhofColors.accent, size: 28),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: WelhofColors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                          color: Colors.black54, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Colors.black26),
-            ],
-          ),
-        ),
-      ),
+  Widget _tile(
+      BuildContext context, IconData icon, String label, VoidCallback onTap) {
+    return ListTile(
+      leading: Icon(icon, color: WelhofColors.brand),
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+      onTap: onTap,
     );
   }
 }
