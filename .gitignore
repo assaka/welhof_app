@@ -24,3 +24,7 @@ build/
 # Misc
 *.lock
 !pubspec.yaml
+
+# Local Marello credentials (never commit)
+.marello_env
+*.secret

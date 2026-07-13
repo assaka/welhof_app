@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import 'orders_list_view.dart';
 import 'section_screen.dart';
 
 /// Order Picking module. Its sub-items (All, Pick, Sort, Exchange) live in a
@@ -27,12 +28,16 @@ class _OrderPickingScreenState extends State<OrderPickingScreen> {
     final tab = _tabs[_index];
     return Scaffold(
       appBar: AppBar(title: const Text('Order Picking')),
-      body: SectionBody(
-        key: ValueKey(tab.label),
-        title: tab.label,
-        icon: tab.icon,
-        breadcrumb: 'Order Picking',
-      ),
+      // "All" shows live orders from Marello; the other tabs remain the demo
+      // tools until their status filters are defined.
+      body: _index == 0
+          ? const OrdersListView(key: ValueKey('orders-all'))
+          : SectionBody(
+              key: ValueKey(tab.label),
+              title: tab.label,
+              icon: tab.icon,
+              breadcrumb: 'Order Picking',
+            ),
       bottomNavigationBar: NavigationBarTheme(
         data: NavigationBarThemeData(
           indicatorColor: WelhofColors.accent.withValues(alpha: 0.20),
