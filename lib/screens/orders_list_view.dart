@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/marello_order.dart';
 import '../services/marello_service.dart';
 import '../theme.dart';
+import 'order_detail_screen.dart';
 
 /// Fetches orders from Marello and renders them, with loading / error / empty
 /// states and pull-to-refresh. Used by the Order Picking "All" tab.
@@ -82,65 +83,84 @@ class _OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final subtitle = <String>[
+      if (order.customerName != null) order.customerName!,
+      if (order.orderDate != null) _date(order.orderDate!),
+      '${order.itemCount} artikel(en)',
+    ].join(' · ');
+
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              height: 46,
-              width: 46,
-              decoration: BoxDecoration(
-                color: WelhofColors.brand.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => OrderDetailScreen(order: order)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                height: 46,
+                width: 46,
+                decoration: BoxDecoration(
+                  color: WelhofColors.brand.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.receipt_long,
+                    color: WelhofColors.brand, size: 24),
               ),
-              child: const Icon(Icons.receipt_long,
-                  color: WelhofColors.brand, size: 24),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      order.orderNumber,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: WelhofColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style:
+                          const TextStyle(color: Colors.black54, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    order.orderNumber,
+                    _money(order.grandTotal, order.currency),
                     style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w600,
                       color: WelhofColors.ink,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${order.itemCount} artikel(en)'
-                    '${order.customerName != null ? ' · ${order.customerName}' : ''}',
-                    style: const TextStyle(color: Colors.black54, fontSize: 13),
-                  ),
+                  if (order.status != null) ...[
+                    const SizedBox(height: 6),
+                    _StatusChip(order.status!),
+                  ],
                 ],
               ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  _money(order.grandTotal, order.currency),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: WelhofColors.ink,
-                  ),
-                ),
-                if (order.status != null) ...[
-                  const SizedBox(height: 6),
-                  _StatusChip(order.status!),
-                ],
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  static String _date(DateTime d) {
+    final l = d.toLocal();
+    String p(int v) => v.toString().padLeft(2, '0');
+    return '${p(l.day)}/${p(l.month)}/${l.year} ${p(l.hour)}:${p(l.minute)}';
   }
 
   static String _money(double v, String currency) {

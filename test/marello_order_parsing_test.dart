@@ -28,6 +28,8 @@ void main() {
     expect(o.currency, 'EUR');
     expect(o.grandTotal, closeTo(31.98, 0.001));
     expect(o.status, 'Pending Order'); // workflowItem.currentStep.label
+    expect(o.customerName, 'Roos Mulder'); // firstName + lastName
+    expect(o.orderDate, DateTime.parse('2026-07-11T13:14:18Z')); // purchaseDate
   });
 
   test('resolves included line items', () {
