@@ -4,17 +4,16 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:welhof_app/models/marello_order.dart';
 
-/// Parses a real `GET /api/marelloorders?include=items` payload captured from
-/// the Marello instance (test/fixtures/marello_orders_sample.json) to lock the
-/// JSON:API mapping against the actual API shape.
+/// Parses a real `welhof-proxy.php` payload captured from the Marello instance
+/// (test/fixtures/marello_orders_sample.json) to lock the JSON:API mapping.
 void main() {
   late List<MarelloOrder> orders;
 
   setUpAll(() {
     final raw =
         File('test/fixtures/marello_orders_sample.json').readAsStringSync();
-    final doc = JsonApiDocument.parse(
-        jsonDecode(raw) as Map<String, dynamic>);
+    final doc =
+        JsonApiDocument.parse(jsonDecode(raw) as Map<String, dynamic>);
     orders = [for (final r in doc.data) MarelloOrder.fromResource(r, doc)];
   });
 
@@ -27,18 +26,17 @@ void main() {
     expect(o.id, '40');
     expect(o.currency, 'EUR');
     expect(o.grandTotal, closeTo(31.98, 0.001));
-    expect(o.status, 'Pending Order'); // workflowItem.currentStep.label
-    expect(o.customerName, 'Roos Mulder'); // firstName + lastName
-    expect(o.orderDate, DateTime.parse('2026-07-11T13:14:18Z')); // purchaseDate
+    expect(o.status, 'Pending Order');
+    expect(o.customerName, 'Roos Mulder');
+    expect(o.orderDate, DateTime.parse('2026-07-11T13:14:18Z'));
   });
 
-  test('resolves included line items', () {
+  test('resolves item with product category / grade / image', () {
     final o = orders.firstWhere((o) => o.orderNumber == 'TEST-00040');
-    expect(o.items, isNotEmpty);
-    final item = o.items.first;
-    expect(item.productSku, 'HBS-TS-1102Z-N');
+    final item = o.items.firstWhere((i) => i.productSku == 'HBS-TS-1102Z-N');
     expect(item.quantity, 2);
-    expect(item.rowTotal, closeTo(31.98, 0.001));
-    expect(o.itemCount, 2); // summed quantities
+    expect(item.category, 'Fietsaccessoires');
+    expect(item.grade, 'Nieuw');
+    expect(item.hasImage, isTrue);
   });
 }

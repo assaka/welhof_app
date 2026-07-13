@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../models/marello_order.dart';
+import '../services/marello_service.dart';
+import '../services/pick_progress.dart';
 import '../theme.dart';
 
-/// Picking detail for a single order: header (order no. / customer / date)
-/// plus one row per line item. Each row can be marked Picked / Sorted and
-/// expanded to a Details panel (image, grade, category, notes, actions).
+/// Picking detail for a single order. Workflow:
+///  1. Pick each line item → header counter `X/N picked`.
+///  2. When all picked, the order is marked **Picked** (green) and a location
+///     dropdown (A1/B1/B2/C1) + highlighted **Sort** button appear.
+///  3. Choosing a location and pressing Sort stages the order for shipment →
+///     **Sorted @ location**.
+/// Each row expands to a Details panel with the product image, grade, category
+/// and notes. State is shared via [PickProgress] so the order list reflects it.
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({super.key, required this.order});
 
@@ -15,63 +22,93 @@ class OrderDetailScreen extends StatefulWidget {
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
 
-enum _Pick { pending, picked, sorted }
+const _locations = <String>['A1', 'B1', 'B2', 'C1'];
 
 class _OrderDetailScreenState extends State<OrderDetailScreen> {
-  // Per-item picking state and which row is expanded (-1 = none).
-  late final List<_Pick> _state =
-      List<_Pick>.filled(widget.order.items.length, _Pick.pending);
+  final MarelloConfig _cfg = MarelloConfig.fromEnvironment();
+  final PickProgress _progress = PickProgress.instance;
   int _expanded = -1;
-
-  void _cyclePick(int i) {
-    setState(() {
-      _state[i] = switch (_state[i]) {
-        _Pick.pending => _Pick.picked,
-        _Pick.picked => _Pick.sorted,
-        _Pick.sorted => _Pick.pending,
-      };
-    });
-  }
+  String _pendingLocation = _locations.first;
 
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
     return Scaffold(
       appBar: AppBar(title: Text(order.orderNumber)),
-      body: Column(
-        children: [
-          _Header(order: order),
-          const Divider(height: 1),
-          Expanded(
-            child: order.items.isEmpty
-                ? const Center(
-                    child: Text('Geen artikelen in deze bestelling.',
-                        style: TextStyle(color: Colors.black54)),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: order.items.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _ItemRow(
-                      item: order.items[i],
-                      state: _state[i],
-                      expanded: _expanded == i,
-                      customerNote: order.customerName,
-                      onPick: () => _cyclePick(i),
-                      onToggleExpand: () =>
-                          setState(() => _expanded = _expanded == i ? -1 : i),
-                    ),
-                  ),
-          ),
-        ],
+      body: AnimatedBuilder(
+        animation: _progress,
+        builder: (context, _) {
+          final total = order.items.length;
+          final picked = _progress.pickedCount(order.id);
+          final allPicked = _progress.allPicked(order.id, total);
+          final sortedLoc = _progress.sortedLocation(order.id);
+
+          return Column(
+            children: [
+              _Header(
+                order: order,
+                picked: picked,
+                total: total,
+                sortedLocation: sortedLoc,
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: order.items.isEmpty
+                    ? const Center(
+                        child: Text('Geen artikelen in deze bestelling.',
+                            style: TextStyle(color: Colors.black54)),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(12),
+                        itemCount: order.items.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (_, i) {
+                          final item = order.items[i];
+                          return _ItemRow(
+                            item: item,
+                            imageUrl: item.hasImage
+                                ? _cfg.imageUrlFor(item.productSku)
+                                : null,
+                            picked: _progress.isItemPicked(order.id, item.id),
+                            sorted: sortedLoc != null,
+                            expanded: _expanded == i,
+                            customerNote: order.customerName,
+                            onPick: () =>
+                                _progress.toggleItem(order.id, item.id),
+                            onToggleExpand: () => setState(
+                                () => _expanded = _expanded == i ? -1 : i),
+                          );
+                        },
+                      ),
+              ),
+              _SortBar(
+                enabled: allPicked,
+                sortedLocation: sortedLoc,
+                selected: _pendingLocation,
+                onSelect: (v) => setState(() => _pendingLocation = v),
+                onSort: () => _progress.setSorted(order.id, _pendingLocation),
+                onUndo: () => _progress.clearSorted(order.id),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.order});
+  const _Header({
+    required this.order,
+    required this.picked,
+    required this.total,
+    required this.sortedLocation,
+  });
+
   final MarelloOrder order;
+  final int picked;
+  final int total;
+  final String? sortedLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -79,6 +116,17 @@ class _Header extends StatelessWidget {
       if (order.customerName != null) order.customerName!,
       if (order.orderDate != null) _fmtDate(order.orderDate!),
     ];
+    final allPicked = total > 0 && picked >= total;
+
+    Widget badge;
+    if (sortedLocation != null) {
+      badge = _Badge('Sorted • $sortedLocation', const Color(0xFF39D353));
+    } else if (allPicked) {
+      badge = const _Badge('Picked', Color(0xFF39D353));
+    } else {
+      badge = _Badge('$picked/$total picked', Colors.white24);
+    }
+
     return Container(
       width: double.infinity,
       color: WelhofColors.brand,
@@ -97,14 +145,11 @@ class _Header extends StatelessWidget {
                       fontWeight: FontWeight.bold),
                 ),
               ),
-              Text(
-                '${order.itemCount} artikel(en)',
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
-              ),
+              badge,
             ],
           ),
           if (bits.isNotEmpty) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(bits.join('  ·  '),
                 style: const TextStyle(color: Colors.white70, fontSize: 13)),
           ],
@@ -120,10 +165,32 @@ class _Header extends StatelessWidget {
   }
 }
 
+class _Badge extends StatelessWidget {
+  const _Badge(this.label, this.color);
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(label,
+          style: const TextStyle(
+              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+    );
+  }
+}
+
 class _ItemRow extends StatelessWidget {
   const _ItemRow({
     required this.item,
-    required this.state,
+    required this.imageUrl,
+    required this.picked,
+    required this.sorted,
     required this.expanded,
     required this.onPick,
     required this.onToggleExpand,
@@ -131,7 +198,9 @@ class _ItemRow extends StatelessWidget {
   });
 
   final MarelloOrderItem item;
-  final _Pick state;
+  final String? imageUrl;
+  final bool picked;
+  final bool sorted;
   final bool expanded;
   final VoidCallback onPick;
   final VoidCallback onToggleExpand;
@@ -151,6 +220,8 @@ class _ItemRow extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
+                  _Thumb(imageUrl: imageUrl, size: 46),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -178,18 +249,20 @@ class _ItemRow extends StatelessWidget {
                   OutlinedButton(
                     onPressed: onPick,
                     style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(56, 36),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      minimumSize: const Size(58, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      backgroundColor: picked
+                          ? const Color(0xFF39D353).withValues(alpha: 0.12)
+                          : null,
                     ),
-                    child: const Text('Pick'),
+                    child: Text(picked ? 'Undo' : 'Pick'),
                   ),
                   const SizedBox(width: 8),
                   Column(
                     children: [
-                      _StatusPill('Picked',
-                          on: state == _Pick.picked || state == _Pick.sorted),
+                      _StatusPill('Picked', on: picked || sorted),
                       const SizedBox(height: 4),
-                      _StatusPill('Sorted', on: state == _Pick.sorted),
+                      _StatusPill('Sorted', on: sorted),
                     ],
                   ),
                   Icon(expanded ? Icons.expand_less : Icons.expand_more,
@@ -198,8 +271,43 @@ class _ItemRow extends StatelessWidget {
               ),
             ),
           ),
-          if (expanded) _DetailsPanel(customerNote: customerNote),
+          if (expanded)
+            _DetailsPanel(
+                item: item, imageUrl: imageUrl, customerNote: customerNote),
         ],
+      ),
+    );
+  }
+}
+
+class _Thumb extends StatelessWidget {
+  const _Thumb({required this.imageUrl, required this.size});
+  final String? imageUrl;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final placeholder = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: WelhofColors.brand.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Icon(Icons.inventory_2_outlined,
+          color: WelhofColors.brand, size: 22),
+    );
+    if (imageUrl == null) return placeholder;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.network(
+        imageUrl!,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => placeholder,
+        loadingBuilder: (context, child, progress) =>
+            progress == null ? child : placeholder,
       ),
     );
   }
@@ -213,7 +321,7 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 56,
+      width: 58,
       padding: const EdgeInsets.symmetric(vertical: 2),
       decoration: BoxDecoration(
         color: on ? const Color(0xFF39D353) : const Color(0xFFEDEFF2),
@@ -232,11 +340,120 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
-/// Inline "Details" panel mirroring the picking-detail mockup. The metadata
-/// fields (image, grade, category, order link) aren't in the order payload,
-/// so they render as labelled affordances; the customer note uses live data.
+/// Bottom bar for the Sort step: a location dropdown + a highlighted Sort
+/// button, enabled once every item is picked.
+class _SortBar extends StatelessWidget {
+  const _SortBar({
+    required this.enabled,
+    required this.sortedLocation,
+    required this.selected,
+    required this.onSelect,
+    required this.onSort,
+    required this.onUndo,
+  });
+
+  final bool enabled;
+  final String? sortedLocation;
+  final String selected;
+  final ValueChanged<String> onSelect;
+  final VoidCallback onSort;
+  final VoidCallback onUndo;
+
+  @override
+  Widget build(BuildContext context) {
+    if (sortedLocation != null) {
+      return Material(
+        elevation: 8,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          color: const Color(0xFFE9FBEF),
+          child: SafeArea(
+            top: false,
+            child: Row(
+              children: [
+                const Icon(Icons.local_shipping,
+                    color: Color(0xFF2AA745), size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Gesorteerd — klaar op locatie $sortedLocation',
+                    style: const TextStyle(
+                        color: Color(0xFF1E7A34),
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+                TextButton(onPressed: onUndo, child: const Text('Wijzig')),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Material(
+      elevation: 8,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        color: Colors.white,
+        child: SafeArea(
+          top: false,
+          child: Row(
+            children: [
+              Expanded(
+                child: Opacity(
+                  opacity: enabled ? 1 : 0.5,
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: 'Locatie',
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selected,
+                        isExpanded: true,
+                        onChanged:
+                            enabled ? (v) => onSelect(v ?? selected) : null,
+                        items: [
+                          for (final loc in _locations)
+                            DropdownMenuItem(value: loc, child: Text(loc)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                onPressed: enabled ? onSort : null,
+                icon: const Icon(Icons.sort),
+                label: const Text('Sort'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: WelhofColors.accent,
+                  minimumSize: const Size(0, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline "Details" panel: real product image, grade and category, the
+/// customer note, plus the mockup's action affordances (not yet wired).
 class _DetailsPanel extends StatelessWidget {
-  const _DetailsPanel({this.customerNote});
+  const _DetailsPanel({
+    required this.item,
+    required this.imageUrl,
+    this.customerNote,
+  });
+
+  final MarelloOrderItem item;
+  final String? imageUrl;
   final String? customerNote;
 
   @override
@@ -247,30 +464,31 @@ class _DetailsPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Details',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, color: WelhofColors.ink)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Wrap(
-            spacing: 16,
-            runSpacing: 8,
-            children: [
-              _MetaLink('Image', Icons.image_outlined),
-              _MetaLink('Grade', Icons.grade_outlined),
-              _MetaLink('Category', Icons.category_outlined),
-              _MetaLink('Note', Icons.sticky_note_2_outlined),
-              _MetaLink('Orderlink', Icons.link),
-            ],
-          ),
+          const Text('Details',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, color: WelhofColors.ink)),
           const SizedBox(height: 10),
-          Text(
-            'Klantnotitie: ${customerNote != null && customerNote!.isNotEmpty ? customerNote! : '—'}',
-            style: const TextStyle(color: Colors.black54, fontSize: 13),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Thumb(imageUrl: imageUrl, size: 84),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _MetaRow('Grade', item.grade ?? '—'),
+                    _MetaRow('Category', item.category ?? '—'),
+                    _MetaRow('SKU', item.productSku),
+                    _MetaRow(
+                        'Klantnotitie',
+                        (customerNote?.isNotEmpty ?? false)
+                            ? customerNote!
+                            : '—'),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           const Wrap(
@@ -289,26 +507,24 @@ class _DetailsPanel extends StatelessWidget {
   }
 }
 
-class _MetaLink extends StatelessWidget {
-  const _MetaLink(this.label, this.icon);
+class _MetaRow extends StatelessWidget {
+  const _MetaRow(this.label, this.value);
   final String label;
-  final IconData icon;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Builder(
-      builder: (context) => InkWell(
-        onTap: () => _todo(context, label),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: RichText(
+        text: TextSpan(
+          style: const TextStyle(color: Colors.black87, fontSize: 13),
           children: [
-            Icon(icon, size: 16, color: WelhofColors.brand),
-            const SizedBox(width: 4),
-            Text(label,
+            TextSpan(
+                text: '$label: ',
                 style: const TextStyle(
-                    color: WelhofColors.brand,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500)),
+                    color: Colors.black54, fontWeight: FontWeight.w600)),
+            TextSpan(text: value),
           ],
         ),
       ),
@@ -323,7 +539,11 @@ class _ActionLink extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => _todo(context, label),
+      onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text('$label — nog niet gekoppeld'),
+            duration: const Duration(seconds: 1)),
+      ),
       child: Text(
         label,
         style: const TextStyle(
@@ -335,10 +555,4 @@ class _ActionLink extends StatelessWidget {
       ),
     );
   }
-}
-
-void _todo(BuildContext context, String label) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(content: Text('$label — nog niet gekoppeld'), duration: const Duration(seconds: 1)),
-  );
 }

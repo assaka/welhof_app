@@ -50,6 +50,18 @@ class MarelloConfig {
   bool get usesProxy => ordersEndpoint.isNotEmpty;
 
   bool get hasCredentials => apiUser.isNotEmpty && apiKey.isNotEmpty;
+
+  /// Base URL of the product-image endpoint (sibling of the orders proxy),
+  /// or empty when not proxying. Call as `$imageEndpoint?product=<sku>`.
+  String get imageEndpoint => usesProxy
+      ? ordersEndpoint.replaceFirst(
+          RegExp(r'welhof-proxy\.php$'), 'welhof-image.php')
+      : '';
+
+  /// Image URL for a product SKU, or null when unavailable.
+  String? imageUrlFor(String sku) => imageEndpoint.isEmpty
+      ? null
+      : '$imageEndpoint?product=${Uri.encodeQueryComponent(sku)}';
 }
 
 /// Raised when a Marello API call fails; [statusCode] is null on transport
@@ -67,8 +79,8 @@ class MarelloApiException implements Exception {
 /// Thin client over Marello's Oro JSON:API. Currently exposes order fetching.
 class MarelloService {
   MarelloService({required this.config, MarelloAuth? auth, http.Client? client})
-      : _auth = auth ??
-            WsseAuth(username: config.apiUser, apiKey: config.apiKey),
+      : _auth =
+            auth ?? WsseAuth(username: config.apiUser, apiKey: config.apiKey),
         _client = client ?? http.Client();
 
   final MarelloConfig config;
@@ -77,12 +89,11 @@ class MarelloService {
 
   static const _jsonApi = 'application/vnd.api+json';
 
-  /// Fetches orders (newest first), resolving their line items in one round
-  /// trip via `include=items`. [pageSize] caps the page.
+  /// Fetches orders (newest first), resolving line items (and, via the proxy,
+  /// product/customer data) in one round trip. [pageSize] caps the page.
   ///
   /// [status] filters by workflow-step label/name — applied client-side, as
-  /// the order status is a workflow step, not an API-filterable field (only
-  /// `orderNumber` / `orderReference` are).
+  /// the order status is a workflow step, not an API-filterable field.
   Future<List<MarelloOrder>> fetchOrders({
     String? status,
     int pageSize = 50,

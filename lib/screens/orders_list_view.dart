@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/marello_order.dart';
 import '../services/marello_service.dart';
+import '../services/pick_progress.dart';
 import '../theme.dart';
 import 'order_detail_screen.dart';
 
@@ -65,11 +66,15 @@ class _OrdersListViewState extends State<OrdersListView> {
               scrollable: true,
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: orders.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) => _OrderCard(order: orders[i]),
+          // Rebuild cards when shared picking progress changes.
+          return AnimatedBuilder(
+            animation: PickProgress.instance,
+            builder: (_, __) => ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: orders.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) => _OrderCard(order: orders[i]),
+            ),
           );
         },
       ),
@@ -144,10 +149,8 @@ class _OrderCard extends StatelessWidget {
                       color: WelhofColors.ink,
                     ),
                   ),
-                  if (order.status != null) ...[
-                    const SizedBox(height: 6),
-                    _StatusChip(order.status!),
-                  ],
+                  const SizedBox(height: 6),
+                  _stageChip(order),
                 ],
               ),
             ],
@@ -171,6 +174,49 @@ class _OrderCard extends StatelessWidget {
       _ => currency.isEmpty ? '' : '$currency ',
     };
     return '$symbol${v.toStringAsFixed(2)}';
+  }
+}
+
+/// Trailing chip reflecting the shared picking stage, falling back to the
+/// Marello order status when picking hasn't started.
+Widget _stageChip(MarelloOrder order) {
+  final p = PickProgress.instance;
+  final total = order.items.length;
+  switch (p.stageOf(order.id, total)) {
+    case PickStage.sorted:
+      return _SolidChip(
+          'Sorted • ${p.sortedLocation(order.id)}', const Color(0xFF39D353));
+    case PickStage.picked:
+      return const _SolidChip('Picked', Color(0xFF39D353));
+    case PickStage.picking:
+      return _SolidChip(
+          '${p.pickedCount(order.id)}/$total picked', const Color(0xFFE08A00));
+    case PickStage.open:
+      return order.status != null
+          ? _StatusChip(order.status!)
+          : const SizedBox.shrink();
+  }
+}
+
+class _SolidChip extends StatelessWidget {
+  const _SolidChip(this.label, this.color);
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+            color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+      ),
+    );
   }
 }
 
