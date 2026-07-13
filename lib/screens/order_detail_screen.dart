@@ -5,14 +5,14 @@ import '../services/marello_service.dart';
 import '../services/pick_progress.dart';
 import '../theme.dart';
 
-/// Picking detail for a single order. Workflow:
-///  1. Pick each line item unit-by-unit (a line of quantity 2 needs 2 picks)
-///     → header counter `X/N picked` where N is the total number of units.
-///  2. Once a row is fully picked its **Pick** button becomes a **Sort**
-///     button; pressing it stages that row at the location chosen in the bar.
-///  3. When every row is sorted the order is **Sorted**.
-/// Each row expands to a Details panel with the product image, grade, category
-/// and notes. State is shared via [PickProgress] so the order list reflects it.
+/// Picking detail for a single order. Per-row flow:
+///  1. While a row isn't fully picked it shows its **warehouse pick location**
+///     and a `Pick` button; every unit must be picked (counter `x/qty`).
+///  2. Once fully picked the row shows **Picked** plus a **dock dropdown**;
+///     choosing a dock and pressing **Sort** stages the row at that dock.
+///  3. After sorting the row shows its **DOCK** and is marked **Sorted**.
+/// Order-level status (list + header) rolls these up. State is shared via
+/// [PickProgress] and persisted on-device (not written back to Marello).
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({super.key, required this.order});
 
@@ -22,13 +22,15 @@ class OrderDetailScreen extends StatefulWidget {
   State<OrderDetailScreen> createState() => _OrderDetailScreenState();
 }
 
-const _locations = <String>['A1', 'B1', 'B2', 'C1'];
+/// Shipment docks a picked row can be staged at.
+const _docks = <String>['A1', 'A2', 'A3', 'B1', 'B2', 'B3', 'C1', 'C2'];
 
 class _OrderDetailScreenState extends State<OrderDetailScreen> {
   final MarelloConfig _cfg = MarelloConfig.fromEnvironment();
   final PickProgress _progress = PickProgress.instance;
   int _expanded = -1;
-  String _pendingLocation = _locations.first;
+  // Per-row dock selection pending confirmation via the row's Sort button.
+  final Map<String, String> _pendingDock = {};
 
   @override
   Widget build(BuildContext context) {
@@ -42,9 +44,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           final total = order.itemCount; // total units (sum of quantities)
           final picked = _progress.pickedUnits(order.id);
           final allSorted = _progress.allSorted(order.id, lineCount);
-          final anyToSort = order.items.any((it) =>
-              _progress.isItemComplete(order.id, it.id, it.quantity) &&
-              !_progress.isItemSorted(order.id, it.id));
 
           return Column(
             children: [
@@ -52,8 +51,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 order: order,
                 picked: picked,
                 total: total,
-                sortedLocations:
-                    allSorted ? _progress.sortedLocations(order.id) : const [],
+                sortedLocations: allSorted
+                    ? _progress.sortedLocations(order.id)
+                    : const [],
               ),
               const Divider(height: 1),
               Expanded(
@@ -73,15 +73,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             imageUrl: item.hasImage
                                 ? _cfg.imageUrlFor(item.productSku)
                                 : null,
+                            pickLocation: _pickLocation(item.productSku),
                             pickedQty: _progress.pickedQty(order.id, item.id),
-                            location:
+                            sortedDock:
                                 _progress.itemLocation(order.id, item.id),
+                            pendingDock: _pendingDock[item.id] ?? _docks.first,
                             expanded: _expanded == i,
                             customerNote: order.customerName,
                             onPick: () => _progress.bumpPick(
                                 order.id, item.id, item.quantity),
-                            onSort: () => _progress.sortItem(
-                                order.id, item.id, _pendingLocation),
+                            onDockChanged: (v) =>
+                                setState(() => _pendingDock[item.id] = v),
+                            onSort: () => _progress.sortItem(order.id, item.id,
+                                _pendingDock[item.id] ?? _docks.first),
                             onUnsort: () =>
                                 _progress.unsortItem(order.id, item.id),
                             onToggleExpand: () => setState(
@@ -90,25 +94,23 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                         },
                       ),
               ),
-              _SortBar(
-                allSorted: allSorted,
-                anyToSort: anyToSort,
-                selected: _pendingLocation,
-                onSelect: (v) => setState(() => _pendingLocation = v),
-                onSortAll: () {
-                  for (final it in order.items) {
-                    if (_progress.isItemComplete(order.id, it.id, it.quantity) &&
-                        !_progress.isItemSorted(order.id, it.id)) {
-                      _progress.sortItem(order.id, it.id, _pendingLocation);
-                    }
-                  }
-                },
-              ),
             ],
           );
         },
       ),
     );
+  }
+
+  /// Deterministic placeholder pick location (Marello has no bin data on this
+  /// instance): a stable aisle+bin derived from the SKU, e.g. "A12".
+  static String _pickLocation(String sku) {
+    var h = 0;
+    for (final c in sku.codeUnits) {
+      h = (h * 31 + c) & 0x7fffffff;
+    }
+    final aisle = String.fromCharCode('A'.codeUnitAt(0) + (h % 4)); // A–D
+    final bin = (h ~/ 4) % 30 + 1; // 1–30
+    return '$aisle${bin.toString().padLeft(2, '0')}';
   }
 }
 
@@ -124,7 +126,7 @@ class _Header extends StatelessWidget {
   final int picked;
   final int total;
 
-  /// Non-empty only when every row is sorted; the distinct staging locations.
+  /// Non-empty only when every row is sorted; the distinct dock locations.
   final List<String> sortedLocations;
 
   @override
@@ -207,10 +209,13 @@ class _ItemRow extends StatelessWidget {
   const _ItemRow({
     required this.item,
     required this.imageUrl,
+    required this.pickLocation,
     required this.pickedQty,
-    required this.location,
+    required this.sortedDock,
+    required this.pendingDock,
     required this.expanded,
     required this.onPick,
+    required this.onDockChanged,
     required this.onSort,
     required this.onUnsort,
     required this.onToggleExpand,
@@ -219,10 +224,13 @@ class _ItemRow extends StatelessWidget {
 
   final MarelloOrderItem item;
   final String? imageUrl;
+  final String pickLocation;
   final int pickedQty;
-  final String? location; // sorted location, or null
+  final String? sortedDock; // dock if sorted, else null
+  final String pendingDock;
   final bool expanded;
   final VoidCallback onPick;
+  final ValueChanged<String> onDockChanged;
   final VoidCallback onSort;
   final VoidCallback onUnsort;
   final VoidCallback onToggleExpand;
@@ -231,109 +239,118 @@ class _ItemRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final complete = pickedQty >= item.quantity;
-    final sorted = location != null;
-
-    // Action button: Pick (while picking) → Sort (when picked) → location chip.
-    Widget action;
-    if (sorted) {
-      action = OutlinedButton(
-        onPressed: onUnsort,
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size(60, 34),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          foregroundColor: const Color(0xFF2AA745),
-          side: const BorderSide(color: Color(0xFF39D353)),
-        ),
-        child: Text(location!),
-      );
-    } else if (complete) {
-      action = FilledButton(
-        onPressed: onSort,
-        style: FilledButton.styleFrom(
-          backgroundColor: WelhofColors.accent,
-          minimumSize: const Size(60, 34),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-        ),
-        child: const Text('Sort'),
-      );
-    } else {
-      action = OutlinedButton(
-        onPressed: onPick,
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size(60, 34),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-        ),
-        child: const Text('Pick'),
-      );
-    }
+    final sorted = sortedDock != null;
 
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(14),
       child: Column(
         children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: onToggleExpand,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  _Thumb(imageUrl: imageUrl, size: 46),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item.productName.isEmpty
-                              ? item.productSku
-                              : item.productName,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: WelhofColors.ink),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${item.productSku}   ·   ${item.quantity}×',
-                          style: const TextStyle(
-                              color: Colors.black54, fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Thumb(imageUrl: imageUrl, size: 46),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '$pickedQty/${item.quantity}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: complete
-                              ? const Color(0xFF2AA745)
-                              : Colors.black54,
-                        ),
+                        item.productName.isEmpty
+                            ? item.productSku
+                            : item.productName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: WelhofColors.ink),
                       ),
                       const SizedBox(height: 2),
-                      action,
+                      Text('${item.productSku}  ·  Grade: ${item.grade ?? '—'}',
+                          style: const TextStyle(
+                              color: Colors.black54, fontSize: 12)),
+                      InkWell(
+                        onTap: onToggleExpand,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text('Details',
+                                  style: TextStyle(
+                                      color: WelhofColors.brand,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600)),
+                              Icon(
+                                  expanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                  size: 16,
+                                  color: WelhofColors.brand),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
                   ),
-                  const SizedBox(width: 8),
-                  Column(
-                    children: [
-                      _StatusPill('Picked', on: complete),
+                ),
+                const SizedBox(width: 8),
+                // Location cell: warehouse (picking) → dock dropdown (picked)
+                // → dock (sorted).
+                _LocationCell(
+                  complete: complete,
+                  sortedDock: sortedDock,
+                  pickLocation: pickLocation,
+                  pendingDock: pendingDock,
+                  onDockChanged: onDockChanged,
+                ),
+                const SizedBox(width: 10),
+                // Counter + action (Pick / Sort) + status.
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('$pickedQty/${item.quantity}',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: complete
+                                ? const Color(0xFF2AA745)
+                                : Colors.black54)),
+                    const SizedBox(height: 4),
+                    if (!complete)
+                      OutlinedButton(
+                        onPressed: onPick,
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(58, 32),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        child: const Text('Pick'),
+                      )
+                    else if (!sorted) ...[
+                      const _Tag('Picked', Color(0xFF39D353)),
                       const SizedBox(height: 4),
-                      _StatusPill('Sorted', on: sorted),
+                      FilledButton(
+                        onPressed: onSort,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: WelhofColors.accent,
+                          minimumSize: const Size(58, 32),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        child: const Text('Sort'),
+                      ),
+                    ] else ...[
+                      const _Tag('Picked', Color(0xFF39D353)),
+                      const SizedBox(height: 4),
+                      GestureDetector(
+                        onTap: onUnsort,
+                        child: const _Tag('Sorted', Color(0xFF2AA745)),
+                      ),
                     ],
-                  ),
-                  Icon(expanded ? Icons.expand_less : Icons.expand_more,
-                      color: Colors.black26),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ),
           ),
           if (expanded)
@@ -341,6 +358,139 @@ class _ItemRow extends StatelessWidget {
                 item: item, imageUrl: imageUrl, customerNote: customerNote),
         ],
       ),
+    );
+  }
+}
+
+/// State-dependent location cell.
+class _LocationCell extends StatelessWidget {
+  const _LocationCell({
+    required this.complete,
+    required this.sortedDock,
+    required this.pickLocation,
+    required this.pendingDock,
+    required this.onDockChanged,
+  });
+
+  final bool complete;
+  final String? sortedDock;
+  final String pickLocation;
+  final String pendingDock;
+  final ValueChanged<String> onDockChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    if (sortedDock != null) {
+      return _Box(
+        color: const Color(0xFFE9FBEF),
+        border: const Color(0xFF39D353),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('DOCK',
+                style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF2AA745))),
+            Text(sortedDock!,
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E7A34))),
+          ],
+        ),
+      );
+    }
+    if (complete) {
+      // Dock dropdown to choose the shipment dock.
+      return _Box(
+        color: Colors.white,
+        border: WelhofColors.accent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('DOCK',
+                style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black45)),
+            SizedBox(
+              height: 22,
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: pendingDock,
+                  isDense: true,
+                  iconSize: 18,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: WelhofColors.ink),
+                  onChanged: (v) => onDockChanged(v ?? pendingDock),
+                  items: [
+                    for (final d in _docks)
+                      DropdownMenuItem(value: d, child: Text(d)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    // Warehouse pick location.
+    return _Box(
+      color: const Color(0xFFF4F6F9),
+      border: const Color(0xFFDDE1E6),
+      child: Text(pickLocation,
+          style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: WelhofColors.ink)),
+    );
+  }
+}
+
+class _Box extends StatelessWidget {
+  const _Box({required this.color, required this.border, required this.child});
+  final Color color;
+  final Color border;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 64,
+      constraints: const BoxConstraints(minHeight: 44),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      decoration: BoxDecoration(
+        color: color,
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _Tag extends StatelessWidget {
+  const _Tag(this.label, this.color);
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 58,
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+              fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
     );
   }
 }
@@ -378,127 +528,6 @@ class _Thumb extends StatelessWidget {
   }
 }
 
-class _StatusPill extends StatelessWidget {
-  const _StatusPill(this.label, {required this.on});
-  final String label;
-  final bool on;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 58,
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      decoration: BoxDecoration(
-        color: on ? const Color(0xFF39D353) : const Color(0xFFEDEFF2),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        label,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: on ? Colors.white : Colors.black45,
-        ),
-      ),
-    );
-  }
-}
-
-/// Bottom bar for the Sort step: a location dropdown that per-row Sort buttons
-/// use, plus a "Sorteer alles" shortcut for the remaining picked rows.
-class _SortBar extends StatelessWidget {
-  const _SortBar({
-    required this.allSorted,
-    required this.anyToSort,
-    required this.selected,
-    required this.onSelect,
-    required this.onSortAll,
-  });
-
-  final bool allSorted;
-  final bool anyToSort;
-  final String selected;
-  final ValueChanged<String> onSelect;
-  final VoidCallback onSortAll;
-
-  @override
-  Widget build(BuildContext context) {
-    if (allSorted) {
-      return Material(
-        elevation: 8,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          color: const Color(0xFFE9FBEF),
-          child: const SafeArea(
-            top: false,
-            child: Row(
-              children: [
-                Icon(Icons.local_shipping, color: Color(0xFF2AA745), size: 22),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Alle rijen gesorteerd — klaar voor verzending',
-                    style: TextStyle(
-                        color: Color(0xFF1E7A34), fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Material(
-      elevation: 8,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-        color: Colors.white,
-        child: SafeArea(
-          top: false,
-          child: Row(
-            children: [
-              Expanded(
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'Locatie',
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: selected,
-                      isExpanded: true,
-                      onChanged: (v) => onSelect(v ?? selected),
-                      items: [
-                        for (final loc in _locations)
-                          DropdownMenuItem(value: loc, child: Text(loc)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                onPressed: anyToSort ? onSortAll : null,
-                icon: const Icon(Icons.sort),
-                label: const Text('Sorteer alles'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: WelhofColors.accent,
-                  minimumSize: const Size(0, 48),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// Inline "Details" panel: real product image, grade and category, the
 /// customer note, plus the mockup's action affordances (not yet wired).
 class _DetailsPanel extends StatelessWidget {
@@ -516,14 +545,11 @@ class _DetailsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Details',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold, color: WelhofColors.ink)),
-          const SizedBox(height: 10),
+          const Divider(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
