@@ -146,6 +146,7 @@ class MarelloOrderItem {
     this.category,
     this.grade,
     this.hasImage = false,
+    this.pickLocation,
   });
 
   /// Order-item resource id — a stable key for per-item picking state.
@@ -163,6 +164,10 @@ class MarelloOrderItem {
   /// Whether the product has an image (so the UI only requests existing ones).
   /// Fetch it from the image endpoint keyed by [productSku].
   final bool hasImage;
+
+  /// Warehouse pick location (Marello `inventory_level.pick_location`),
+  /// injected by the proxy; null when the payload doesn't carry it.
+  final String? pickLocation;
 
   factory MarelloOrderItem.fromResource(
     Map<String, dynamic> res,
@@ -197,6 +202,7 @@ class MarelloOrderItem {
       category: category,
       grade: grade,
       hasImage: hasImage,
+      pickLocation: a['pickLocation']?.toString(),
     );
   }
 }

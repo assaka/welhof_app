@@ -31,12 +31,13 @@ void main() {
     expect(o.orderDate, DateTime.parse('2026-07-11T13:14:18Z'));
   });
 
-  test('resolves item with product category / grade / image', () {
+  test('resolves item with product data + pick location', () {
     final o = orders.firstWhere((o) => o.orderNumber == 'TEST-00040');
     final item = o.items.firstWhere((i) => i.productSku == 'HBS-TS-1102Z-N');
     expect(item.quantity, 2);
     expect(item.category, 'Fietsaccessoires');
     expect(item.grade, 'Nieuw');
     expect(item.hasImage, isTrue);
+    expect(item.pickLocation, 'A29'); // injected by the proxy from Marello
   });
 }

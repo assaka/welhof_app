@@ -73,7 +73,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             imageUrl: item.hasImage
                                 ? _cfg.imageUrlFor(item.productSku)
                                 : null,
-                            pickLocation: _pickLocation(item.productSku),
+                            pickLocation: item.pickLocation ??
+                                _pickLocation(item.productSku),
                             pickedQty: _progress.pickedQty(order.id, item.id),
                             sortedDock:
                                 _progress.itemLocation(order.id, item.id),
