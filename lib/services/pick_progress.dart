@@ -6,20 +6,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// The stage an order is in on the warehouse floor.
 enum PickStage { open, picking, picked, sorted }
 
-/// Picking progress, shared across the order list and the detail screen so
-/// status stays consistent while navigating, and persisted on-device via
-/// [SharedPreferences] so it survives app restarts. State is local only — it
-/// is NOT written back to Marello.
+/// Picking progress counted in **units** (a line item of quantity 2 needs two
+/// picks) with **per-row sorting** (each picked row is staged at a location).
+/// Shared across the order list and detail screen and persisted on-device via
+/// [SharedPreferences]. Local only — not written back to Marello.
 class PickProgress extends ChangeNotifier {
   PickProgress._();
   static final PickProgress instance = PickProgress._();
 
   static const _prefsKey = 'welhof.pick_progress';
 
-  // orderId -> set of picked order-item ids.
-  final Map<String, Set<String>> _picked = {};
-  // orderId -> shipment location, once the order has been sorted.
-  final Map<String, String> _sorted = {};
+  // orderId -> (order-item id -> units picked for that item).
+  final Map<String, Map<String, int>> _picked = {};
+  // orderId -> (order-item id -> shipment location, once that row is sorted).
+  final Map<String, Map<String, String>> _sorted = {};
   bool _loaded = false;
 
   /// Loads persisted progress from disk. Idempotent; call once at startup.
@@ -31,14 +31,23 @@ class PickProgress extends ChangeNotifier {
       final raw = prefs.getString(_prefsKey);
       if (raw != null) {
         final data = jsonDecode(raw) as Map<String, dynamic>;
-        (data['picked'] as Map<String, dynamic>? ?? {}).forEach((order, ids) {
-          _picked[order] = {for (final id in (ids as List)) '$id'};
+        (data['picked'] as Map<String, dynamic>? ?? {}).forEach((order, items) {
+          if (items is Map) {
+            _picked[order] = {
+              for (final e in items.entries) '${e.key}': (e.value as num).toInt(),
+            };
+          }
         });
-        (data['sorted'] as Map<String, dynamic>? ?? {})
-            .forEach((order, loc) => _sorted[order] = '$loc');
+        (data['sorted'] as Map<String, dynamic>? ?? {}).forEach((order, items) {
+          if (items is Map) {
+            _sorted[order] = {
+              for (final e in items.entries) '${e.key}': '${e.value}',
+            };
+          }
+        });
       }
     } catch (_) {
-      // Absent or corrupt prefs — start from an empty state.
+      // Absent or corrupt/old-format prefs — start from an empty state.
     }
     notifyListeners();
   }
@@ -49,9 +58,12 @@ class PickProgress extends ChangeNotifier {
       final data = <String, dynamic>{
         'picked': {
           for (final e in _picked.entries)
-            if (e.value.isNotEmpty) e.key: e.value.toList(),
+            if (e.value.isNotEmpty) e.key: e.value,
         },
-        'sorted': _sorted,
+        'sorted': {
+          for (final e in _sorted.entries)
+            if (e.value.isNotEmpty) e.key: e.value,
+        },
       };
       await prefs.setString(_prefsKey, jsonEncode(data));
     } catch (_) {
@@ -59,50 +71,87 @@ class PickProgress extends ChangeNotifier {
     }
   }
 
-  Set<String> _setFor(String orderId) =>
-      _picked.putIfAbsent(orderId, () => <String>{});
+  // ---- Picking (per unit) ----
 
-  bool isItemPicked(String orderId, String itemId) =>
-      _picked[orderId]?.contains(itemId) ?? false;
+  int pickedQty(String orderId, String itemId) =>
+      _picked[orderId]?[itemId] ?? 0;
 
-  int pickedCount(String orderId) => _picked[orderId]?.length ?? 0;
+  bool isItemComplete(String orderId, String itemId, int quantity) =>
+      pickedQty(orderId, itemId) >= quantity;
 
-  bool allPicked(String orderId, int total) =>
-      total > 0 && pickedCount(orderId) >= total;
+  /// Total units picked across the order.
+  int pickedUnits(String orderId) {
+    final map = _picked[orderId];
+    if (map == null) return 0;
+    var sum = 0;
+    for (final v in map.values) {
+      sum += v;
+    }
+    return sum;
+  }
 
-  String? sortedLocation(String orderId) => _sorted[orderId];
+  /// Whether every unit of the order has been picked ([totalUnits] = sum of
+  /// line-item quantities).
+  bool allPicked(String orderId, int totalUnits) =>
+      totalUnits > 0 && pickedUnits(orderId) >= totalUnits;
 
-  /// Toggles an item's picked state. Un-picking anything reverts a prior
-  /// "sorted" (the order is no longer complete).
-  void toggleItem(String orderId, String itemId) {
-    final set = _setFor(orderId);
-    if (!set.remove(itemId)) set.add(itemId);
-    if (set.isEmpty) _picked.remove(orderId);
-    _sorted.remove(orderId);
+  /// Advances an item's picked units by one, wrapping back to 0 once it passes
+  /// [quantity]. Resetting an item also un-sorts it.
+  void bumpPick(String orderId, String itemId, int quantity) {
+    final map = _picked.putIfAbsent(orderId, () => <String, int>{});
+    final next = (map[itemId] ?? 0) + 1;
+    if (next > quantity) {
+      map.remove(itemId);
+      _sorted[orderId]?.remove(itemId);
+    } else {
+      map[itemId] = next;
+    }
+    if (map.isEmpty) _picked.remove(orderId);
+    if (_sorted[orderId]?.isEmpty ?? false) _sorted.remove(orderId);
     notifyListeners();
     _save();
   }
 
-  /// Marks the order staged at [location] for shipment (the Sort step).
-  void setSorted(String orderId, String location) {
-    _sorted[orderId] = location;
+  // ---- Sorting (per row) ----
+
+  /// Location a row is staged at, or null if not yet sorted.
+  String? itemLocation(String orderId, String itemId) =>
+      _sorted[orderId]?[itemId];
+
+  bool isItemSorted(String orderId, String itemId) =>
+      _sorted[orderId]?.containsKey(itemId) ?? false;
+
+  int sortedCount(String orderId) => _sorted[orderId]?.length ?? 0;
+
+  /// Whether every line item ([lineCount] rows) has been sorted.
+  bool allSorted(String orderId, int lineCount) =>
+      lineCount > 0 && sortedCount(orderId) >= lineCount;
+
+  /// Stages a fully-picked row at [location].
+  void sortItem(String orderId, String itemId, String location) {
+    _sorted.putIfAbsent(orderId, () => <String, String>{})[itemId] = location;
     notifyListeners();
     _save();
   }
 
-  void clearSorted(String orderId) {
-    if (_sorted.remove(orderId) != null) {
+  void unsortItem(String orderId, String itemId) {
+    final map = _sorted[orderId];
+    if (map != null && map.remove(itemId) != null) {
+      if (map.isEmpty) _sorted.remove(orderId);
       notifyListeners();
       _save();
     }
   }
 
-  /// Overall stage for an order with [total] line items.
-  PickStage stageOf(String orderId, int total) {
-    if (_sorted.containsKey(orderId)) return PickStage.sorted;
-    final n = pickedCount(orderId);
-    if (total > 0 && n >= total) return PickStage.picked;
-    if (n > 0) return PickStage.picking;
+  // ---- Roll-up ----
+
+  /// Overall stage for an order with [totalUnits] units across [lineCount] rows.
+  PickStage stageOf(String orderId, int totalUnits, int lineCount) {
+    if (allSorted(orderId, lineCount)) return PickStage.sorted;
+    if (allPicked(orderId, totalUnits)) return PickStage.picked;
+    if (pickedUnits(orderId) > 0 || sortedCount(orderId) > 0) {
+      return PickStage.picking;
+    }
     return PickStage.open;
   }
 }

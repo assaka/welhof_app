@@ -6,11 +6,11 @@ import '../services/pick_progress.dart';
 import '../theme.dart';
 
 /// Picking detail for a single order. Workflow:
-///  1. Pick each line item → header counter `X/N picked`.
-///  2. When all picked, the order is marked **Picked** (green) and a location
-///     dropdown (A1/B1/B2/C1) + highlighted **Sort** button appear.
-///  3. Choosing a location and pressing Sort stages the order for shipment →
-///     **Sorted @ location**.
+///  1. Pick each line item unit-by-unit (a line of quantity 2 needs 2 picks)
+///     → header counter `X/N picked` where N is the total number of units.
+///  2. Once a row is fully picked its **Pick** button becomes a **Sort**
+///     button; pressing it stages that row at the location chosen in the bar.
+///  3. When every row is sorted the order is **Sorted**.
 /// Each row expands to a Details panel with the product image, grade, category
 /// and notes. State is shared via [PickProgress] so the order list reflects it.
 class OrderDetailScreen extends StatefulWidget {
@@ -33,15 +33,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
+    final lineCount = order.items.length;
     return Scaffold(
       appBar: AppBar(title: Text(order.orderNumber)),
       body: AnimatedBuilder(
         animation: _progress,
         builder: (context, _) {
-          final total = order.items.length;
-          final picked = _progress.pickedCount(order.id);
-          final allPicked = _progress.allPicked(order.id, total);
-          final sortedLoc = _progress.sortedLocation(order.id);
+          final total = order.itemCount; // total units (sum of quantities)
+          final picked = _progress.pickedUnits(order.id);
+          final allSorted = _progress.allSorted(order.id, lineCount);
+          final anyToSort = order.items.any((it) =>
+              _progress.isItemComplete(order.id, it.id, it.quantity) &&
+              !_progress.isItemSorted(order.id, it.id));
 
           return Column(
             children: [
@@ -49,7 +52,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 order: order,
                 picked: picked,
                 total: total,
-                sortedLocation: sortedLoc,
+                allSorted: allSorted,
               ),
               const Divider(height: 1),
               Expanded(
@@ -69,12 +72,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                             imageUrl: item.hasImage
                                 ? _cfg.imageUrlFor(item.productSku)
                                 : null,
-                            picked: _progress.isItemPicked(order.id, item.id),
-                            sorted: sortedLoc != null,
+                            pickedQty: _progress.pickedQty(order.id, item.id),
+                            location:
+                                _progress.itemLocation(order.id, item.id),
                             expanded: _expanded == i,
                             customerNote: order.customerName,
-                            onPick: () =>
-                                _progress.toggleItem(order.id, item.id),
+                            onPick: () => _progress.bumpPick(
+                                order.id, item.id, item.quantity),
+                            onSort: () => _progress.sortItem(
+                                order.id, item.id, _pendingLocation),
+                            onUnsort: () =>
+                                _progress.unsortItem(order.id, item.id),
                             onToggleExpand: () => setState(
                                 () => _expanded = _expanded == i ? -1 : i),
                           );
@@ -82,12 +90,18 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       ),
               ),
               _SortBar(
-                enabled: allPicked,
-                sortedLocation: sortedLoc,
+                allSorted: allSorted,
+                anyToSort: anyToSort,
                 selected: _pendingLocation,
                 onSelect: (v) => setState(() => _pendingLocation = v),
-                onSort: () => _progress.setSorted(order.id, _pendingLocation),
-                onUndo: () => _progress.clearSorted(order.id),
+                onSortAll: () {
+                  for (final it in order.items) {
+                    if (_progress.isItemComplete(order.id, it.id, it.quantity) &&
+                        !_progress.isItemSorted(order.id, it.id)) {
+                      _progress.sortItem(order.id, it.id, _pendingLocation);
+                    }
+                  }
+                },
               ),
             ],
           );
@@ -102,13 +116,13 @@ class _Header extends StatelessWidget {
     required this.order,
     required this.picked,
     required this.total,
-    required this.sortedLocation,
+    required this.allSorted,
   });
 
   final MarelloOrder order;
   final int picked;
   final int total;
-  final String? sortedLocation;
+  final bool allSorted;
 
   @override
   Widget build(BuildContext context) {
@@ -119,8 +133,8 @@ class _Header extends StatelessWidget {
     final allPicked = total > 0 && picked >= total;
 
     Widget badge;
-    if (sortedLocation != null) {
-      badge = _Badge('Sorted • $sortedLocation', const Color(0xFF39D353));
+    if (allSorted) {
+      badge = const _Badge('Sorted', Color(0xFF39D353));
     } else if (allPicked) {
       badge = const _Badge('Picked', Color(0xFF39D353));
     } else {
@@ -189,25 +203,66 @@ class _ItemRow extends StatelessWidget {
   const _ItemRow({
     required this.item,
     required this.imageUrl,
-    required this.picked,
-    required this.sorted,
+    required this.pickedQty,
+    required this.location,
     required this.expanded,
     required this.onPick,
+    required this.onSort,
+    required this.onUnsort,
     required this.onToggleExpand,
     this.customerNote,
   });
 
   final MarelloOrderItem item;
   final String? imageUrl;
-  final bool picked;
-  final bool sorted;
+  final int pickedQty;
+  final String? location; // sorted location, or null
   final bool expanded;
   final VoidCallback onPick;
+  final VoidCallback onSort;
+  final VoidCallback onUnsort;
   final VoidCallback onToggleExpand;
   final String? customerNote;
 
   @override
   Widget build(BuildContext context) {
+    final complete = pickedQty >= item.quantity;
+    final sorted = location != null;
+
+    // Action button: Pick (while picking) → Sort (when picked) → location chip.
+    Widget action;
+    if (sorted) {
+      action = OutlinedButton(
+        onPressed: onUnsort,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(60, 34),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          foregroundColor: const Color(0xFF2AA745),
+          side: const BorderSide(color: Color(0xFF39D353)),
+        ),
+        child: Text(location!),
+      );
+    } else if (complete) {
+      action = FilledButton(
+        onPressed: onSort,
+        style: FilledButton.styleFrom(
+          backgroundColor: WelhofColors.accent,
+          minimumSize: const Size(60, 34),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+        ),
+        child: const Text('Sort'),
+      );
+    } else {
+      action = OutlinedButton(
+        onPressed: onPick,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(60, 34),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+        ),
+        child: const Text('Pick'),
+      );
+    }
+
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(14),
@@ -246,21 +301,27 @@ class _ItemRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  OutlinedButton(
-                    onPressed: onPick,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(58, 36),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      backgroundColor: picked
-                          ? const Color(0xFF39D353).withValues(alpha: 0.12)
-                          : null,
-                    ),
-                    child: Text(picked ? 'Undo' : 'Pick'),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$pickedQty/${item.quantity}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: complete
+                              ? const Color(0xFF2AA745)
+                              : Colors.black54,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      action,
+                    ],
                   ),
                   const SizedBox(width: 8),
                   Column(
                     children: [
-                      _StatusPill('Picked', on: picked || sorted),
+                      _StatusPill('Picked', on: complete),
                       const SizedBox(height: 4),
                       _StatusPill('Sorted', on: sorted),
                     ],
@@ -340,28 +401,26 @@ class _StatusPill extends StatelessWidget {
   }
 }
 
-/// Bottom bar for the Sort step: a location dropdown + a highlighted Sort
-/// button, enabled once every item is picked.
+/// Bottom bar for the Sort step: a location dropdown that per-row Sort buttons
+/// use, plus a "Sorteer alles" shortcut for the remaining picked rows.
 class _SortBar extends StatelessWidget {
   const _SortBar({
-    required this.enabled,
-    required this.sortedLocation,
+    required this.allSorted,
+    required this.anyToSort,
     required this.selected,
     required this.onSelect,
-    required this.onSort,
-    required this.onUndo,
+    required this.onSortAll,
   });
 
-  final bool enabled;
-  final String? sortedLocation;
+  final bool allSorted;
+  final bool anyToSort;
   final String selected;
   final ValueChanged<String> onSelect;
-  final VoidCallback onSort;
-  final VoidCallback onUndo;
+  final VoidCallback onSortAll;
 
   @override
   Widget build(BuildContext context) {
-    if (sortedLocation != null) {
+    if (allSorted) {
       return Material(
         elevation: 8,
         child: Container(
@@ -369,20 +428,17 @@ class _SortBar extends StatelessWidget {
           color: const Color(0xFFE9FBEF),
           child: SafeArea(
             top: false,
-            child: Row(
+            child: const Row(
               children: [
-                const Icon(Icons.local_shipping,
-                    color: Color(0xFF2AA745), size: 22),
-                const SizedBox(width: 10),
+                Icon(Icons.local_shipping, color: Color(0xFF2AA745), size: 22),
+                SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Gesorteerd — klaar op locatie $sortedLocation',
-                    style: const TextStyle(
-                        color: Color(0xFF1E7A34),
-                        fontWeight: FontWeight.w600),
+                    'Alle rijen gesorteerd — klaar voor verzending',
+                    style: TextStyle(
+                        color: Color(0xFF1E7A34), fontWeight: FontWeight.w600),
                   ),
                 ),
-                TextButton(onPressed: onUndo, child: const Text('Wijzig')),
               ],
             ),
           ),
@@ -400,39 +456,35 @@ class _SortBar extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Opacity(
-                  opacity: enabled ? 1 : 0.5,
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: 'Locatie',
-                      isDense: true,
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: selected,
-                        isExpanded: true,
-                        onChanged:
-                            enabled ? (v) => onSelect(v ?? selected) : null,
-                        items: [
-                          for (final loc in _locations)
-                            DropdownMenuItem(value: loc, child: Text(loc)),
-                        ],
-                      ),
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Locatie',
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: selected,
+                      isExpanded: true,
+                      onChanged: (v) => onSelect(v ?? selected),
+                      items: [
+                        for (final loc in _locations)
+                          DropdownMenuItem(value: loc, child: Text(loc)),
+                      ],
                     ),
                   ),
                 ),
               ),
               const SizedBox(width: 12),
               FilledButton.icon(
-                onPressed: enabled ? onSort : null,
+                onPressed: anyToSort ? onSortAll : null,
                 icon: const Icon(Icons.sort),
-                label: const Text('Sort'),
+                label: const Text('Sorteer alles'),
                 style: FilledButton.styleFrom(
                   backgroundColor: WelhofColors.accent,
                   minimumSize: const Size(0, 48),
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                 ),
               ),
             ],

@@ -181,16 +181,15 @@ class _OrderCard extends StatelessWidget {
 /// Marello order status when picking hasn't started.
 Widget _stageChip(MarelloOrder order) {
   final p = PickProgress.instance;
-  final total = order.items.length;
-  switch (p.stageOf(order.id, total)) {
+  final total = order.itemCount; // total units (sum of line-item quantities)
+  switch (p.stageOf(order.id, total, order.items.length)) {
     case PickStage.sorted:
-      return _SolidChip(
-          'Sorted • ${p.sortedLocation(order.id)}', const Color(0xFF39D353));
+      return const _SolidChip('Sorted', Color(0xFF39D353));
     case PickStage.picked:
       return const _SolidChip('Picked', Color(0xFF39D353));
     case PickStage.picking:
       return _SolidChip(
-          '${p.pickedCount(order.id)}/$total picked', const Color(0xFFE08A00));
+          '${p.pickedUnits(order.id)}/$total picked', const Color(0xFFE08A00));
     case PickStage.open:
       return order.status != null
           ? _StatusChip(order.status!)
