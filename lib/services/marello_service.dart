@@ -21,11 +21,17 @@ class MarelloConfig {
     required this.baseUrl,
     required this.apiUser,
     required this.apiKey,
+    this.ordersEndpoint = '',
   });
 
   final String baseUrl;
   final String apiUser;
   final String apiKey;
+
+  /// Full URL of a server-side orders proxy. When set (e.g. for the public
+  /// web build), the app calls it directly and sends NO credentials — the
+  /// proxy holds the Marello key and handles WSSE + CORS server-side.
+  final String ordersEndpoint;
 
   factory MarelloConfig.fromEnvironment() => const MarelloConfig(
         baseUrl: String.fromEnvironment(
@@ -36,7 +42,12 @@ class MarelloConfig {
         ),
         apiUser: String.fromEnvironment('MARELLO_API_USER'),
         apiKey: String.fromEnvironment('MARELLO_API_KEY'),
+        ordersEndpoint: String.fromEnvironment('MARELLO_ORDERS_ENDPOINT'),
       );
+
+  /// Whether to route through the server-side proxy instead of calling
+  /// Marello directly with WSSE credentials.
+  bool get usesProxy => ordersEndpoint.isNotEmpty;
 
   bool get hasCredentials => apiUser.isNotEmpty && apiKey.isNotEmpty;
 }
@@ -76,14 +87,19 @@ class MarelloService {
     String? status,
     int pageSize = 50,
   }) async {
-    if (!config.hasCredentials) {
+    if (!config.usesProxy && !config.hasCredentials) {
       throw MarelloApiException(
-        'Missing Marello credentials. Pass --dart-define=MARELLO_API_USER '
-        'and --dart-define=MARELLO_API_KEY.',
+        'Marello connection not configured. Set MARELLO_ORDERS_ENDPOINT '
+        '(proxy) or MARELLO_API_USER + MARELLO_API_KEY (direct).',
       );
     }
 
-    final uri = Uri.parse('${config.baseUrl}/api/marelloorders').replace(
+    // Proxy mode calls the server-side endpoint verbatim (it injects auth);
+    // direct mode hits Marello's JSON:API with a client-side WSSE header.
+    final base = config.usesProxy
+        ? config.ordersEndpoint
+        : '${config.baseUrl}/api/marelloorders';
+    final uri = Uri.parse(base).replace(
       queryParameters: <String, String>{
         'include': 'items',
         'page[size]': '$pageSize',
@@ -95,7 +111,7 @@ class MarelloService {
     try {
       res = await _client.get(uri, headers: {
         'Accept': _jsonApi,
-        ...await _auth.authHeaders(),
+        if (!config.usesProxy) ...await _auth.authHeaders(),
       });
     } catch (e) {
       throw MarelloApiException('Network error: $e');

@@ -33,8 +33,13 @@ jobs:
       # https://<user>.github.io/welhof_app/
       # --pwa-strategy=none disables the service worker so deploys aren't
       # served stale from an aggressive app cache.
+      # MARELLO_ORDERS_ENDPOINT points the web app at the server-side proxy,
+      # which holds the Marello key and adds CORS. No credentials are baked
+      # into this public build (the proxy URL is not a secret).
       - name: Build web
-        run: flutter build web --release --base-href /welhof_app/ --pwa-strategy=none
+        run: >
+          flutter build web --release --base-href /welhof_app/ --pwa-strategy=none
+          --dart-define=MARELLO_ORDERS_ENDPOINT=https://staging-marello.welhof.com/welhof-proxy.php
 
       # --pwa-strategy=none writes an empty flutter_service_worker.js; replace
       # it with our self-destroying one so returning visitors' old caching
