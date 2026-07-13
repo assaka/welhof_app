@@ -52,7 +52,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 order: order,
                 picked: picked,
                 total: total,
-                allSorted: allSorted,
+                sortedLocations:
+                    allSorted ? _progress.sortedLocations(order.id) : const [],
               ),
               const Divider(height: 1),
               Expanded(
@@ -116,13 +117,15 @@ class _Header extends StatelessWidget {
     required this.order,
     required this.picked,
     required this.total,
-    required this.allSorted,
+    required this.sortedLocations,
   });
 
   final MarelloOrder order;
   final int picked;
   final int total;
-  final bool allSorted;
+
+  /// Non-empty only when every row is sorted; the distinct staging locations.
+  final List<String> sortedLocations;
 
   @override
   Widget build(BuildContext context) {
@@ -133,8 +136,9 @@ class _Header extends StatelessWidget {
     final allPicked = total > 0 && picked >= total;
 
     Widget badge;
-    if (allSorted) {
-      badge = const _Badge('Sorted', Color(0xFF39D353));
+    if (sortedLocations.isNotEmpty) {
+      badge = _Badge('Sorted • ${sortedLocations.join(', ')}',
+          const Color(0xFF39D353));
     } else if (allPicked) {
       badge = const _Badge('Picked', Color(0xFF39D353));
     } else {
@@ -426,9 +430,9 @@ class _SortBar extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           color: const Color(0xFFE9FBEF),
-          child: SafeArea(
+          child: const SafeArea(
             top: false,
-            child: const Row(
+            child: Row(
               children: [
                 Icon(Icons.local_shipping, color: Color(0xFF2AA745), size: 22),
                 SizedBox(width: 10),

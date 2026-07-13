@@ -184,7 +184,9 @@ Widget _stageChip(MarelloOrder order) {
   final total = order.itemCount; // total units (sum of line-item quantities)
   switch (p.stageOf(order.id, total, order.items.length)) {
     case PickStage.sorted:
-      return const _SolidChip('Sorted', Color(0xFF39D353));
+      return _SolidChip(
+          'Sorted • ${p.sortedLocations(order.id).join(', ')}',
+          const Color(0xFF39D353));
     case PickStage.picked:
       return const _SolidChip('Picked', Color(0xFF39D353));
     case PickStage.picking:

@@ -123,6 +123,13 @@ class PickProgress extends ChangeNotifier {
 
   int sortedCount(String orderId) => _sorted[orderId]?.length ?? 0;
 
+  /// Distinct locations this order's rows are staged at, sorted (e.g. A1, B2).
+  List<String> sortedLocations(String orderId) {
+    final map = _sorted[orderId];
+    if (map == null || map.isEmpty) return const [];
+    return map.values.toSet().toList()..sort();
+  }
+
   /// Whether every line item ([lineCount] rows) has been sorted.
   bool allSorted(String orderId, int lineCount) =>
       lineCount > 0 && sortedCount(orderId) >= lineCount;
