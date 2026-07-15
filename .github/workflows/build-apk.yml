@@ -1,0 +1,49 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Android builds need a JDK; the web workflow doesn't.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Proxy mode: same server-side proxy the web build targets (it holds the
+      # Marello key + does WSSE). No credentials are baked into this build — the
+      # proxy URL is not a secret. The release APK is debug-signed (the
+      # android/app/build.gradle.kts release buildType uses the debug signing
+      # config), so it installs for testing without a release keystore.
+      - name: Build release APK
+        run: >
+          flutter build apk --release
+          --dart-define=MARELLO_ORDERS_ENDPOINT=https://staging-marello.welhof.com/welhof-proxy.php
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: welhof-app-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
