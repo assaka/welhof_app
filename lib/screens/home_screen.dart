@@ -152,8 +152,25 @@ class WelhofDrawer extends StatelessWidget {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                _tile(context, Icons.shopping_cart_checkout, 'Orderverzamelen',
-                    () => _open(context, const OrderPickingScreen())),
+                ExpansionTile(
+                  leading: const Icon(Icons.shopping_cart_checkout,
+                      color: WelhofColors.brand),
+                  title: const Text('Orderverzamelen',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
+                  childrenPadding: const EdgeInsets.only(left: 16),
+                  children: [
+                    _tile(context, Icons.list_alt, 'Orders',
+                        () => _open(context, const OrderPickingScreen())),
+                    _tile(context, Icons.receipt_long, 'Paklijsten',
+                        () => _open(
+                            context,
+                            const SectionScreen(
+                              title: 'Paklijsten',
+                              icon: Icons.receipt_long,
+                              breadcrumb: 'Orderverzamelen',
+                            ))),
+                  ],
+                ),
                 // Incoming products → its single child (Returns) as a
                 // collapsible sub-item.
                 ExpansionTile(
