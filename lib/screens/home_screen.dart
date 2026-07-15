@@ -5,6 +5,8 @@ import '../theme.dart';
 import 'registration_screen.dart';
 import 'order_picking_screen.dart';
 import 'lot_list_screen.dart';
+import 'packing_slip_list_screen.dart';
+import 'purchase_order_list_screen.dart';
 import 'section_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -162,13 +164,7 @@ class WelhofDrawer extends StatelessWidget {
                     _tile(context, Icons.list_alt, 'Orders',
                         () => _open(context, const OrderPickingScreen())),
                     _tile(context, Icons.receipt_long, 'Paklijsten',
-                        () => _open(
-                            context,
-                            const SectionScreen(
-                              title: 'Paklijsten',
-                              icon: Icons.receipt_long,
-                              breadcrumb: 'Orderverzamelen',
-                            ))),
+                        () => _open(context, const PackingSlipListScreen())),
                   ],
                 ),
                 // Incoming products → its single child (Returns) as a
@@ -182,12 +178,7 @@ class WelhofDrawer extends StatelessWidget {
                   children: [
                     _tile(context, Icons.inventory_2, 'Batch',
                         () => _open(
-                            context,
-                            const SectionScreen(
-                              title: 'Batch',
-                              icon: Icons.inventory_2,
-                              breadcrumb: 'Inkomende producten',
-                            ))),
+                            context, const PurchaseOrderListScreen())),
                     _tile(context, Icons.assignment_return, 'Retouren',
                         () => _open(context, const LotListScreen())),
                   ],

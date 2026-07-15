@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/marello_docs.dart';
 import '../models/marello_lot.dart';
 import '../models/marello_order.dart';
 import 'marello_auth.dart';
@@ -276,6 +277,37 @@ class MarelloService {
       throw MarelloApiException('Unexpected capture response.');
     }
     return MarelloLotItem.fromCaptureJson(body);
+  }
+
+  /// Fetches supplier purchase orders (newest first).
+  Future<List<MarelloPurchaseOrder>> fetchPurchaseOrders({int pageSize = 50}) async {
+    _ensureConfigured();
+    final base = config.usesProxy
+        ? config.ordersEndpoint
+        : '${config.baseUrl}/api/marellopurchaseorders';
+    final uri = Uri.parse(base).replace(queryParameters: <String, String>{
+      if (config.usesProxy) 'resource': 'purchase-orders',
+      if (!config.usesProxy) 'include': 'supplier',
+      'sort': '-id',
+      'page[size]': '$pageSize',
+    });
+    final doc = await _fetchDoc(uri);
+    return [for (final r in doc.data) MarelloPurchaseOrder.fromResource(r, doc)];
+  }
+
+  /// Fetches packing slips (newest first).
+  Future<List<MarelloPackingSlip>> fetchPackingSlips({int pageSize = 50}) async {
+    _ensureConfigured();
+    final base = config.usesProxy
+        ? config.ordersEndpoint
+        : '${config.baseUrl}/api/marellopackingslips';
+    final uri = Uri.parse(base).replace(queryParameters: <String, String>{
+      if (config.usesProxy) 'resource': 'packing-slips',
+      'sort': '-id',
+      'page[size]': '$pageSize',
+    });
+    final doc = await _fetchDoc(uri);
+    return [for (final r in doc.data) MarelloPackingSlip.fromResource(r, doc)];
   }
 
   /// OCRs a photo of a product's name (server-side tesseract) and returns the
