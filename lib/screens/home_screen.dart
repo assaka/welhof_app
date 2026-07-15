@@ -163,6 +163,14 @@ class WelhofDrawer extends StatelessWidget {
                       style: TextStyle(fontWeight: FontWeight.w600)),
                   childrenPadding: const EdgeInsets.only(left: 16),
                   children: [
+                    _tile(context, Icons.inventory_2, 'Batch',
+                        () => _open(
+                            context,
+                            const SectionScreen(
+                              title: 'Batch',
+                              icon: Icons.inventory_2,
+                              breadcrumb: 'Inkomende producten',
+                            ))),
                     _tile(context, Icons.assignment_return, 'Retouren',
                         () => _open(context, const LotListScreen())),
                   ],
