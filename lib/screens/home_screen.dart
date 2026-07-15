@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../theme.dart';
 import 'registration_screen.dart';
 import 'order_picking_screen.dart';
+import 'lot_list_screen.dart';
 import 'section_screen.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -151,49 +152,43 @@ class WelhofDrawer extends StatelessWidget {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                _tile(context, Icons.shopping_cart_checkout, 'Order Picking',
+                _tile(context, Icons.shopping_cart_checkout, 'Orderverzamelen',
                     () => _open(context, const OrderPickingScreen())),
                 // Incoming products → its single child (Returns) as a
                 // collapsible sub-item.
                 ExpansionTile(
                   leading: const Icon(Icons.move_to_inbox,
                       color: WelhofColors.brand),
-                  title: const Text('Incoming products',
+                  title: const Text('Inkomende producten',
                       style: TextStyle(fontWeight: FontWeight.w600)),
                   childrenPadding: const EdgeInsets.only(left: 16),
                   children: [
-                    _tile(context, Icons.assignment_return, 'Returns',
-                        () => _open(
-                            context,
-                            const SectionScreen(
-                              title: 'Returns',
-                              icon: Icons.assignment_return,
-                              breadcrumb: 'Incoming products',
-                            ))),
+                    _tile(context, Icons.assignment_return, 'Retouren',
+                        () => _open(context, const LotListScreen())),
                   ],
                 ),
-                _tile(context, Icons.edit_location_alt, 'Change locations',
+                _tile(context, Icons.edit_location_alt, 'Locaties wijzigen',
                     () => _open(
                         context,
                         const SectionScreen(
-                          title: 'Change locations',
+                          title: 'Locaties wijzigen',
                           icon: Icons.edit_location_alt,
                         ))),
-                _tile(context, Icons.build, 'Repairs',
+                _tile(context, Icons.build, 'Reparaties',
                     () => _open(
                         context,
                         const SectionScreen(
-                            title: 'Repairs', icon: Icons.build))),
-                _tile(context, Icons.warehouse, 'Stock',
+                            title: 'Reparaties', icon: Icons.build))),
+                _tile(context, Icons.warehouse, 'Voorraad',
                     () => _open(
                         context,
                         const SectionScreen(
-                            title: 'Stock', icon: Icons.warehouse))),
-                _tile(context, Icons.help_outline, 'Faq',
+                            title: 'Voorraad', icon: Icons.warehouse))),
+                _tile(context, Icons.help_outline, 'Veelgestelde vragen',
                     () => _open(
                         context,
                         const SectionScreen(
-                            title: 'Faq', icon: Icons.help_outline))),
+                            title: 'Veelgestelde vragen', icon: Icons.help_outline))),
                 _tile(context, Icons.badge, 'HRM',
                     () => _open(
                         context,
