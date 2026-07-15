@@ -278,6 +278,35 @@ class MarelloService {
     return MarelloLotItem.fromCaptureJson(body);
   }
 
+  /// OCRs a photo of a product's name (server-side tesseract) and returns the
+  /// best-guess text, for feeding the name search. Proxy-only.
+  Future<String> ocrProductName(
+    List<int> photoBytes, {
+    String filename = 'name.jpg',
+  }) async {
+    if (!config.usesProxy) {
+      throw MarelloApiException('OCR is available in proxy mode only.');
+    }
+    final uri = Uri.parse(config.ordersEndpoint).replace(
+      queryParameters: <String, String>{'resource': 'ocr'},
+    );
+    final req = http.MultipartRequest('POST', uri)
+      ..files.add(http.MultipartFile.fromBytes('photo', photoBytes,
+          filename: filename));
+
+    late final http.Response res;
+    try {
+      res = await http.Response.fromStream(await _client.send(req));
+    } catch (e) {
+      throw MarelloApiException('Network error: $e');
+    }
+    if (res.statusCode != 200) {
+      throw MarelloApiException(_describeError(res), statusCode: res.statusCode);
+    }
+    final body = jsonDecode(utf8.decode(res.bodyBytes));
+    return (body is Map && body['text'] is String) ? body['text'] as String : '';
+  }
+
   void _ensureConfigured() {
     if (!config.usesProxy && !config.hasCredentials) {
       throw MarelloApiException(

@@ -72,6 +72,39 @@ class _LotCaptureScreenState extends State<LotCaptureScreen> {
     }
   }
 
+  /// Photographs the product name, OCRs it server-side, fills the name field
+  /// and searches.
+  Future<void> _ocrName() async {
+    XFile? file;
+    try {
+      file = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        imageQuality: 85,
+      );
+    } catch (e) {
+      _snack('Kon foto niet openen: $e');
+      return;
+    }
+    if (file == null) return;
+    setState(() => _searching = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final text = (await _service.ocrProductName(bytes)).trim();
+      if (!mounted) return;
+      if (text.isEmpty) {
+        _snack('Geen tekst herkend');
+        return;
+      }
+      _nameCtrl.text = text;
+      await _search(name: text); // manages the searching indicator
+    } catch (e) {
+      if (mounted) _snack('Herkennen mislukt: $e');
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
   Future<void> _pickPhoto(ImageSource source) async {
     try {
       final file = await _picker.pickImage(
@@ -154,7 +187,7 @@ class _LotCaptureScreenState extends State<LotCaptureScreen> {
             ),
             const SizedBox(height: 16),
 
-            // Name search
+            // Name search (type, or photograph the name → OCR)
             _label('Zoek op naam (indien geen barcode)'),
             Row(
               children: [
@@ -167,7 +200,13 @@ class _LotCaptureScreenState extends State<LotCaptureScreen> {
                     onSubmitted: (v) => _search(name: v.trim()),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'Naam van foto herkennen',
+                  onPressed: _submitting ? null : _ocrName,
+                  icon: const Icon(Icons.document_scanner_outlined),
+                  color: WelhofColors.brand,
+                ),
                 OutlinedButton(
                   onPressed: _submitting
                       ? null
