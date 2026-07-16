@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../models/marello_docs.dart';
 import '../models/marello_lot.dart';
 import '../models/marello_order.dart';
+import '../models/marello_pick.dart';
 import 'marello_auth.dart';
 
 /// Connection settings for the Marello instance.
@@ -295,19 +296,91 @@ class MarelloService {
     return [for (final r in doc.data) MarelloPurchaseOrder.fromResource(r, doc)];
   }
 
-  /// Fetches packing slips (newest first).
-  Future<List<MarelloPackingSlip>> fetchPackingSlips({int pageSize = 50}) async {
-    _ensureConfigured();
-    final base = config.usesProxy
-        ? config.ordersEndpoint
-        : '${config.baseUrl}/api/marellopackingslips';
-    final uri = Uri.parse(base).replace(queryParameters: <String, String>{
-      if (config.usesProxy) 'resource': 'packing-slips',
-      'sort': '-id',
-      'page[size]': '$pageSize',
-    });
-    final doc = await _fetchDoc(uri);
-    return [for (final r in doc.data) MarelloPackingSlip.fromResource(r, doc)];
+  /// Fetches packing slips (newest first) with their pick status + counts.
+  /// Proxy-only: the pick state lives on plain columns exposed by the Welhof
+  /// pick endpoint (not Marello's JSON:API).
+  Future<List<PickSlip>> fetchPackingSlips({int pageSize = 50}) async {
+    if (!config.usesProxy) {
+      throw MarelloApiException('Packing slips are available in proxy mode only.');
+    }
+    final uri = Uri.parse(config.ordersEndpoint).replace(
+      queryParameters: <String, String>{
+        'resource': 'packing-slips',
+        'page[size]': '$pageSize',
+      },
+    );
+    final body = await _getJson(uri);
+    final data = body['data'];
+    if (data is! List) return const [];
+    return [
+      for (final e in data)
+        if (e is Map<String, dynamic>) PickSlip.fromJson(e),
+    ];
+  }
+
+  /// Fetches one packing slip's items + pick state for the picking screen.
+  Future<PickSlip> fetchPickSlip(int slipId) async {
+    _ensureProxy();
+    final uri = Uri.parse(config.ordersEndpoint).replace(
+      queryParameters: <String, String>{'resource': 'pick', 'slip': '$slipId'},
+    );
+    return PickSlip.fromJson(await _getJson(uri));
+  }
+
+  /// Scans a barcode against a slip: picks one unit of the matching item.
+  Future<ScanResult> scanPickSlip(int slipId, String barcode) async {
+    _ensureProxy();
+    final uri = Uri.parse(config.ordersEndpoint).replace(
+      queryParameters: <String, String>{
+        'resource': 'pick',
+        'action': 'scan',
+        'slip': '$slipId',
+      },
+    );
+    final res = await _postForm(uri, {'barcode': barcode});
+    if (res.statusCode != 200) {
+      final body = _tryJson(res.body);
+      final err = body is Map ? '${body['error'] ?? 'scan_failed'}' : 'scan_failed';
+      return ScanResult.failed(err);
+    }
+    final body = _tryJson(res.body);
+    if (body is! Map<String, dynamic>) return ScanResult.failed('bad_response');
+    return ScanResult.matched(body);
+  }
+
+  /// Appoints a dock for a fully-picked item (empty [dock] clears it).
+  Future<PickSlip> sortPickItem(int itemId, String dock) =>
+      _itemAction(itemId, 'sort', {'dock': dock});
+
+  /// Manually picks one unit (fallback / correction).
+  Future<PickSlip> pickItemUnit(int itemId) => _itemAction(itemId, 'pick', {});
+
+  /// Resets an item's pick + dock.
+  Future<PickSlip> resetPickItem(int itemId) => _itemAction(itemId, 'reset', {});
+
+  Future<PickSlip> _itemAction(
+    int itemId,
+    String action,
+    Map<String, String> fields,
+  ) async {
+    _ensureProxy();
+    final uri = Uri.parse(config.ordersEndpoint).replace(
+      queryParameters: <String, String>{
+        'resource': 'pick',
+        'action': action,
+        'item': '$itemId',
+      },
+    );
+    final res = await _postForm(uri, fields);
+    if (res.statusCode != 200) {
+      throw MarelloApiException(_describeError(res), statusCode: res.statusCode);
+    }
+    final body = _tryJson(res.body);
+    final slip = (body is Map) ? body['slip'] : null;
+    if (slip is! Map<String, dynamic>) {
+      throw MarelloApiException('Unexpected pick response.');
+    }
+    return PickSlip.fromJson(slip);
   }
 
   /// OCRs a photo of a product's name (server-side tesseract) and returns the
@@ -345,6 +418,46 @@ class MarelloService {
         'Marello connection not configured. Set MARELLO_ORDERS_ENDPOINT '
         '(proxy) or MARELLO_API_USER + MARELLO_API_KEY (direct).',
       );
+    }
+  }
+
+  void _ensureProxy() {
+    if (!config.usesProxy) {
+      throw MarelloApiException('Picking is available in proxy mode only.');
+    }
+  }
+
+  /// GETs a plain JSON object (proxy endpoints that aren't JSON:API).
+  Future<Map<String, dynamic>> _getJson(Uri uri) async {
+    late final http.Response res;
+    try {
+      res = await _client.get(uri, headers: {'Accept': 'application/json'});
+    } catch (e) {
+      throw MarelloApiException('Network error: $e');
+    }
+    if (res.statusCode != 200) {
+      throw MarelloApiException(_describeError(res), statusCode: res.statusCode);
+    }
+    final body = _tryJson(utf8.decode(res.bodyBytes));
+    if (body is! Map<String, dynamic>) {
+      throw MarelloApiException('Unexpected response shape.');
+    }
+    return body;
+  }
+
+  Future<http.Response> _postForm(Uri uri, Map<String, String> fields) async {
+    try {
+      return await _client.post(uri, headers: {'Accept': 'application/json'}, body: fields);
+    } catch (e) {
+      throw MarelloApiException('Network error: $e');
+    }
+  }
+
+  dynamic _tryJson(String s) {
+    try {
+      return jsonDecode(s);
+    } catch (_) {
+      return null;
     }
   }
 

@@ -17,17 +17,17 @@ class _OrderPickingScreenState extends State<OrderPickingScreen> {
   int _index = 0;
 
   static const _tabs = <_PickTab>[
-    _PickTab('All', Icons.list_alt),
-    _PickTab('Pick', Icons.touch_app),
-    _PickTab('Sort', Icons.sort),
-    _PickTab('Exchange', Icons.swap_horiz),
+    _PickTab('Alle', Icons.list_alt),
+    _PickTab('Picken', Icons.touch_app),
+    _PickTab('Sorteren', Icons.sort),
+    _PickTab('Ruilen', Icons.swap_horiz),
   ];
 
   @override
   Widget build(BuildContext context) {
     final tab = _tabs[_index];
     return Scaffold(
-      appBar: AppBar(title: const Text('Order Picking')),
+      appBar: AppBar(title: const Text('Orderverzamelen')),
       // "All" shows live orders from Marello; the other tabs remain the demo
       // tools until their status filters are defined.
       body: _index == 0
@@ -36,7 +36,7 @@ class _OrderPickingScreenState extends State<OrderPickingScreen> {
               key: ValueKey(tab.label),
               title: tab.label,
               icon: tab.icon,
-              breadcrumb: 'Order Picking',
+              breadcrumb: 'Orderverzamelen',
             ),
       bottomNavigationBar: NavigationBarTheme(
         data: NavigationBarThemeData(
