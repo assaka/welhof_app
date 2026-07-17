@@ -52,6 +52,7 @@ class PickItem {
     required this.quantity,
     required this.pickedQty,
     required this.sortDock,
+    required this.pickLocation,
   });
 
   final int id;
@@ -60,6 +61,10 @@ class PickItem {
   final int quantity;
   final int pickedQty;
   final String? sortDock;
+
+  /// Warehouse shelf the product is stored at (where to walk to pick it), shown
+  /// on the row. Distinct from [sortDock] (where the picked unit is staged).
+  final String? pickLocation;
 
   bool get complete => pickedQty >= quantity;
   bool get sorted => sortDock != null && sortDock!.isNotEmpty;
@@ -73,7 +78,29 @@ class PickItem {
         sortDock: (j['sortDock'] == null || '${j['sortDock']}'.isEmpty)
             ? null
             : '${j['sortDock']}',
+        pickLocation: (j['pickLocation'] == null ||
+                '${j['pickLocation']}'.isEmpty)
+            ? null
+            : '${j['pickLocation']}',
       );
+}
+
+/// Outcome of verifying (without committing) that a scanned barcode belongs to a
+/// specific packing-slip item — used to stage a unit in the per-row scanner.
+class VerifyResult {
+  VerifyResult({required this.match, this.productSku, this.error});
+
+  final bool match;
+  final String? productSku;
+  final String? error;
+
+  factory VerifyResult.fromJson(Map<String, dynamic> j) => VerifyResult(
+        match: j['match'] == true,
+        productSku: j['productSku']?.toString(),
+      );
+
+  factory VerifyResult.failed(String error) =>
+      VerifyResult(match: false, error: error);
 }
 
 /// Outcome of scanning a barcode against a slip.

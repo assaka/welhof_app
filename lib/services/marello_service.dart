@@ -348,12 +348,38 @@ class MarelloService {
     return ScanResult.matched(body);
   }
 
+  /// Verifies (no write) that a scanned [barcode] belongs to [itemId] — used by
+  /// the per-row scanner to stage a unit before the picker confirms.
+  Future<VerifyResult> verifyPickItem(int itemId, String barcode) async {
+    _ensureProxy();
+    final uri = Uri.parse(config.ordersEndpoint).replace(
+      queryParameters: <String, String>{
+        'resource': 'pick',
+        'action': 'verify',
+        'item': '$itemId',
+      },
+    );
+    final res = await _postForm(uri, {'barcode': barcode});
+    if (res.statusCode != 200) {
+      final body = _tryJson(res.body);
+      final err =
+          body is Map ? '${body['error'] ?? 'verify_failed'}' : 'verify_failed';
+      return VerifyResult.failed(err);
+    }
+    final body = _tryJson(res.body);
+    if (body is! Map<String, dynamic>) return VerifyResult.failed('bad_response');
+    return VerifyResult.fromJson(body);
+  }
+
+  /// Commits a per-row pick session: sets the item's [pickedQty] (absolute) and
+  /// its [dock] in one call (the Confirm action). A [dock] is only accepted once
+  /// every unit is picked.
+  Future<PickSlip> commitPickItem(int itemId, int pickedQty, String dock) =>
+      _itemAction(itemId, 'commit', {'pickedQty': '$pickedQty', 'dock': dock});
+
   /// Appoints a dock for a fully-picked item (empty [dock] clears it).
   Future<PickSlip> sortPickItem(int itemId, String dock) =>
       _itemAction(itemId, 'sort', {'dock': dock});
-
-  /// Manually picks one unit (fallback / correction).
-  Future<PickSlip> pickItemUnit(int itemId) => _itemAction(itemId, 'pick', {});
 
   /// Resets an item's pick + dock.
   Future<PickSlip> resetPickItem(int itemId) => _itemAction(itemId, 'reset', {});

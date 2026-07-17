@@ -4,12 +4,14 @@ import '../models/marello_pick.dart';
 import '../services/marello_service.dart';
 import '../theme.dart';
 import 'lot_common.dart';
-import 'pick_scanner_screen.dart';
+import 'pick_item_scan_screen.dart';
 
-/// Picks a single Marello packing slip. Each item is scanned unit-by-unit (a
-/// qty-3 SKU is scanned three times), then a dock is appointed and the row
-/// Sorted. When every item is fully picked the slip shows **Completed**. All
-/// state is written to Marello's packing slip via the pick endpoint.
+/// Picks a single Marello packing slip. Each row is scanned on its own: tapping
+/// **Scan** opens the per-row scanner, where the line's units are scanned (a
+/// qty-3 SKU is scanned three times), a dock is appointed once every unit is in,
+/// and the pick is confirmed. Cancelling a scan writes nothing. When every item
+/// is fully picked the slip shows **Completed**. All state lives on Marello's
+/// packing slip via the pick endpoint.
 class PackingPickScreen extends StatefulWidget {
   const PackingPickScreen({
     super.key,
@@ -35,7 +37,6 @@ class _PackingPickScreenState extends State<PackingPickScreen> {
   PickSlip? _slip;
   bool _loading = true;
   Object? _error;
-  final Map<int, String> _pendingDock = {};
 
   @override
   void initState() {
@@ -64,16 +65,18 @@ class _PackingPickScreenState extends State<PackingPickScreen> {
     }
   }
 
-  Future<ScanResult> _scan(String barcode) async {
-    final r = await _service.scanPickSlip(widget.slipId, barcode);
-    if (r.slip != null && mounted) setState(() => _slip = r.slip);
-    return r;
-  }
-
-  Future<void> _openScanner() async {
+  Future<void> _scanRow(PickItem item) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => PickScannerScreen(onScan: _scan),
+        builder: (_) => PickItemScanScreen(
+          item: item,
+          docks: _docks,
+          onVerify: (barcode) => _service.verifyPickItem(item.id, barcode),
+          onCommit: (pickedQty, dock) async {
+            final slip = await _service.commitPickItem(item.id, pickedQty, dock);
+            if (mounted) setState(() => _slip = slip);
+          },
+        ),
       ),
     );
     await _load(); // reconcile after the scanning session
@@ -97,14 +100,6 @@ class _PackingPickScreenState extends State<PackingPickScreen> {
     final slip = _slip;
     return Scaffold(
       appBar: AppBar(title: Text('Paklijst ${widget.slipNumber}')),
-      floatingActionButton: (slip != null && !slip.completed)
-          ? FloatingActionButton.extended(
-              onPressed: _openScanner,
-              backgroundColor: WelhofColors.accent,
-              icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('Scannen'),
-            )
-          : null,
       body: _loading && slip == null
           ? const Center(child: CircularProgressIndicator())
           : _error != null
@@ -134,17 +129,9 @@ class _PackingPickScreenState extends State<PackingPickScreen> {
                                   item: item,
                                   imageUrl:
                                       _service.config.imageUrlFor(item.productSku),
-                                  pendingDock:
-                                      _pendingDock[item.id] ?? _docks.first,
-                                  onDockChanged: (v) => setState(
-                                      () => _pendingDock[item.id] = v),
-                                  onSort: () => _run(() => _service.sortPickItem(
-                                      item.id,
-                                      _pendingDock[item.id] ?? _docks.first)),
+                                  onScan: () => _scanRow(item),
                                   onUnsort: () => _run(
                                       () => _service.sortPickItem(item.id, '')),
-                                  onPick: () => _run(
-                                      () => _service.pickItemUnit(item.id)),
                                   onReset: () => _run(
                                       () => _service.resetPickItem(item.id)),
                                 );
@@ -223,21 +210,15 @@ class _ItemRow extends StatelessWidget {
   const _ItemRow({
     required this.item,
     required this.imageUrl,
-    required this.pendingDock,
-    required this.onDockChanged,
-    required this.onSort,
+    required this.onScan,
     required this.onUnsort,
-    required this.onPick,
     required this.onReset,
   });
 
   final PickItem item;
   final String? imageUrl;
-  final String pendingDock;
-  final ValueChanged<String> onDockChanged;
-  final VoidCallback onSort;
+  final VoidCallback onScan;
   final VoidCallback onUnsort;
-  final VoidCallback onPick;
   final VoidCallback onReset;
 
   @override
@@ -270,6 +251,25 @@ class _ItemRow extends StatelessWidget {
                   Text(item.productSku,
                       style:
                           const TextStyle(color: Colors.black54, fontSize: 12)),
+                  if (item.pickLocation != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(Icons.place_outlined,
+                            size: 14, color: WelhofColors.brand),
+                        const SizedBox(width: 3),
+                        Flexible(
+                          child: Text('Loc ${item.pickLocation}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  color: WelhofColors.brand,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 6),
                   // Unit progress bar.
                   ClipRRect(
@@ -312,14 +312,10 @@ class _ItemRow extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             _RightCell(
-              complete: complete,
               sorted: sorted,
               dock: item.sortDock,
-              pendingDock: pendingDock,
-              onDockChanged: onDockChanged,
-              onSort: onSort,
+              onScan: onScan,
               onUnsort: onUnsort,
-              onPick: onPick,
             ),
           ],
         ),
@@ -328,28 +324,20 @@ class _ItemRow extends StatelessWidget {
   }
 }
 
-/// Right-hand action cell: manual Pick while unfinished → dock dropdown + Sort
-/// once fully picked → DOCK badge once sorted.
+/// Right-hand action cell: a **Scan** button until the row is sorted, then a
+/// DOCK badge (tap to release the dock and re-scan/re-dock).
 class _RightCell extends StatelessWidget {
   const _RightCell({
-    required this.complete,
     required this.sorted,
     required this.dock,
-    required this.pendingDock,
-    required this.onDockChanged,
-    required this.onSort,
+    required this.onScan,
     required this.onUnsort,
-    required this.onPick,
   });
 
-  final bool complete;
   final bool sorted;
   final String? dock;
-  final String pendingDock;
-  final ValueChanged<String> onDockChanged;
-  final VoidCallback onSort;
+  final VoidCallback onScan;
   final VoidCallback onUnsort;
-  final VoidCallback onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -382,56 +370,16 @@ class _RightCell extends StatelessWidget {
         ),
       );
     }
-    if (complete) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 64,
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            decoration: BoxDecoration(
-              border: Border.all(color: WelhofColors.accent),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: pendingDock,
-                isDense: true,
-                isExpanded: true,
-                iconSize: 18,
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: WelhofColors.ink),
-                onChanged: (v) => onDockChanged(v ?? pendingDock),
-                items: [
-                  for (final d in _docks)
-                    DropdownMenuItem(value: d, child: Text(d)),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          FilledButton(
-            onPressed: onSort,
-            style: FilledButton.styleFrom(
-              backgroundColor: WelhofColors.accent,
-              minimumSize: const Size(64, 30),
-              padding: EdgeInsets.zero,
-            ),
-            child: const Text('Sort'),
-          ),
-        ],
-      );
-    }
-    // Not fully picked: manual +1 fallback (scanning is preferred).
-    return OutlinedButton(
-      onPressed: onPick,
+    return OutlinedButton.icon(
+      onPressed: onScan,
+      icon: const Icon(Icons.qr_code_scanner, size: 18),
+      label: const Text('Scan'),
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(64, 40),
-        padding: EdgeInsets.zero,
+        foregroundColor: WelhofColors.accent,
+        side: const BorderSide(color: WelhofColors.accent),
+        minimumSize: const Size(84, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
       ),
-      child: const Text('+1'),
     );
   }
 }
